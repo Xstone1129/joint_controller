@@ -1,0 +1,6 @@
+string owner_id
+string lease_id
+bool request_arm_torque_off
+---
+bool released
+string message

@@ -1,0 +1,6 @@
+# Optional Heavy lift brake command. The lower Heavy lift controller owns the
+# automatic brake state; this request never routes to the Junior lift board.
+bool release
+---
+bool accepted
+string message

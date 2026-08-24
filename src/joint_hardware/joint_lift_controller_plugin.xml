@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<library path="joint_lift_controller">
+  <class
+    name="joint_hardware/LiftController"
+    type="joint_hardware::LiftController"
+    base_class_type="controller_interface::ControllerInterface">
+    <description>
+      Unified one-axis Ruckig lift controller for position, trajectory, streaming, jog and stop.
+    </description>
+  </class>
+</library>

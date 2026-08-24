@@ -1,0 +1,24 @@
+/**/controller_manager:
+  ros__parameters:
+    update_rate: 100
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+    lift_controller:
+      type: joint_hardware/LiftController
+
+/**/lift_controller:
+  ros__parameters:
+    joint: joint_motor
+    position_min_m: -1.0
+    position_max_m: 0.0
+    max_velocity_mps: 0.060
+    max_acceleration_mps2: 0.10
+    max_jerk_mps3: 0.4
+    default_velocity_scale: 0.80
+    jog_timeout_sec: 0.45
+    brake_gate_stable_sec: 0.10
+    driver_status_timeout_sec: 2.0
+    target_stable_sec: 1.0
+    goal_tolerance_m: 0.001
+    stationary_velocity_mps: 0.001
+    status_rate_hz: 20.0

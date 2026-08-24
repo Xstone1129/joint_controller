@@ -1,0 +1,39 @@
+[Unit]
+Description=Joint controller robot stack (real hardware)
+After=network-online.target NetworkManager.service
+Wants=network-online.target
+Conflicts=joint-controller-stack-sim.service joint-controller-stack.service robot.service
+
+[Service]
+# start.sh keeps the REAL stack alive and monitors the IGH process.  A
+# oneshot unit would remain active after the background driver had exited.
+Type=simple
+Environment=SUDO_USER=user
+Environment=ROS_DOMAIN_ID=2
+Environment=ROS_LOCALHOST_ONLY=0
+Environment=RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+Environment=CYCLONEDDS_URI=file:///home/user/joint_controller/cyclonedds.xml
+Environment=ROS_DISCOVERY_SERVER=
+Environment=FASTRTPS_DEFAULT_PROFILES_FILE=
+Environment=FASTDDS_BUILTIN_TRANSPORTS=
+Environment=FASTDDS_DEFAULT_PROFILES_FILE=
+Environment=SIM=0.0
+Environment=USE_RVIZ=true
+Environment=ENABLE_EFFORT_MODE_SWITCH=false
+# This host's REAL preflight reads and validates LD3M P04.38=0 ms on every
+# startup. A mismatch fails hardware configure before Operation Enabled.
+Environment=LIFT_BRAKE_CONTROL_ENABLED=true
+Environment=LIFT_BRAKE_RELEASE_WAIT_MS=0
+Environment=LIFT_ZERO_OFFSET_FILE=/home/user/.local/state/joint_controller/lift_zero_offset.cfg
+ExecStart=/home/user/joint_controller/start.sh
+SuccessExitStatus=130 143
+TimeoutStartSec=60
+TimeoutStopSec=45
+# SIGTERM reaches start.sh first; its EXIT trap requests power-off and then
+# cleans ROS, IGH, and EtherCAT in that order. Remaining children are killed
+# only after the bounded cleanup deadline.
+KillSignal=SIGTERM
+KillMode=mixed
+
+[Install]
+WantedBy=multi-user.target

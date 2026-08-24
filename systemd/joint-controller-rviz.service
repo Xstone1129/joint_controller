@@ -1,0 +1,26 @@
+[Unit]
+Description=RViz visualization for the joint controller simulation
+After=graphical.target joint-controller-stack-sim.service
+PartOf=joint-controller-stack-sim.service
+Conflicts=joint-controller-stack-real.service
+
+[Service]
+Type=simple
+User=user
+Group=user
+WorkingDirectory=/home/user/joint_controller
+Environment=ROS_DOMAIN_ID=2
+Environment=ROS_LOCALHOST_ONLY=0
+Environment=RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+Environment=CYCLONEDDS_URI=file:///home/user/joint_controller/cyclonedds.xml
+Environment=ROS_DISCOVERY_SERVER=
+Environment=FASTRTPS_DEFAULT_PROFILES_FILE=
+Environment=FASTDDS_BUILTIN_TRANSPORTS=
+Environment=FASTDDS_DEFAULT_PROFILES_FILE=
+ExecStart=/home/user/joint_controller/scripts/run_joint_controller_rviz.sh
+TimeoutStopSec=10
+KillSignal=SIGINT
+KillMode=control-group
+
+[Install]
+WantedBy=graphical.target

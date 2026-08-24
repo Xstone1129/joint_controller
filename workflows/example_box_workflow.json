@@ -1,0 +1,42 @@
+{
+  "name": "box workflow example",
+  "power_on": true,
+  "defaults": {
+    "joint_vel": 0.5,
+    "joint_acc": 0.5,
+    "cartesian_vel": 0.02,
+    "cartesian_acc": 0.05,
+    "delay_after": 1.0,
+    "service_timeout": 10.0
+  },
+  "steps": [
+    {
+      "name": "prepare big box grasp",
+      "type": "joint",
+      "state": "准备抱紧大箱子（伸缩8cm）",
+      "sleep": 1.0
+    },
+    {
+      "name": "grasp big box",
+      "type": "joint",
+      "state": "抱紧大箱子",
+      "sleep": 1.0
+    },
+    {
+      "name": "lift both arms 10cm",
+      "type": "cartesian_increment",
+      "dz": 0.10,
+      "vel": 0.02,
+      "acc": 0.05,
+      "sleep": 0.5
+    },
+    {
+      "name": "lower both arms 10cm",
+      "type": "cartesian_increment",
+      "dz": -0.10,
+      "vel": 0.02,
+      "acc": 0.05,
+      "sleep": 0.5
+    }
+  ]
+}

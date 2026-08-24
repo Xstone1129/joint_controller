@@ -1,0 +1,22 @@
+uint8 STATE_OFFLINE=0
+uint8 STATE_MONITOR=1
+uint8 STATE_LEASED_HOLD=2
+uint8 STATE_FOLLOWING=3
+uint8 STATE_STOPPING=4
+uint8 STATE_FAULT=5
+
+std_msgs/Header header
+uint16 protocol_major
+uint16 protocol_minor
+uint32 layout_crc32
+uint8 state
+string active_owner_id
+string active_lease_id
+float64 lease_remaining_ms
+float64 command_age_ms
+float64 publish_rate_hz
+uint64 accepted_commands
+uint64 rejected_commands
+uint64 duplicate_commands
+uint64 out_of_order_commands
+string detail

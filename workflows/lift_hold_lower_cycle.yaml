@@ -1,0 +1,153 @@
+name: lift_hold_lower_10cm_10_cycles
+power_on_at_start: false
+power_off_at_end: false
+
+services:
+  cartesian_increment: /cartesian_increment_control
+
+defaults:
+  cartesian_vel: 0.04
+  cartesian_acc: 0.05
+  service_timeout: 90.0
+  confirm_after: false
+  delay_after: 0.0
+  cartesian_delay_after: 0.0
+
+cartesian_requests:
+  lift_10cm: &lift_10cm
+    lz: 0.1
+    rz: 0.1
+  lower_10cm: &lower_10cm
+    lz: -0.1
+    rz: -0.1
+
+steps:
+  - name: "cycle 01 lift 10cm"
+    action: cartesian_increment
+    request: *lift_10cm
+  - name: "cycle 01 hold 10s"
+    action: sleep
+    seconds: 10.0
+  - name: "cycle 01 lower 10cm"
+    action: cartesian_increment
+    request: *lower_10cm
+  - name: "cycle 01 wait 2s"
+    action: sleep
+    seconds: 2.0
+
+  - name: "cycle 02 lift 10cm"
+    action: cartesian_increment
+    request: *lift_10cm
+  - name: "cycle 02 hold 10s"
+    action: sleep
+    seconds: 10.0
+  - name: "cycle 02 lower 10cm"
+    action: cartesian_increment
+    request: *lower_10cm
+  - name: "cycle 02 wait 2s"
+    action: sleep
+    seconds: 2.0
+
+  - name: "cycle 03 lift 10cm"
+    action: cartesian_increment
+    request: *lift_10cm
+  - name: "cycle 03 hold 10s"
+    action: sleep
+    seconds: 10.0
+  - name: "cycle 03 lower 10cm"
+    action: cartesian_increment
+    request: *lower_10cm
+  - name: "cycle 03 wait 2s"
+    action: sleep
+    seconds: 2.0
+
+  - name: "cycle 04 lift 10cm"
+    action: cartesian_increment
+    request: *lift_10cm
+  - name: "cycle 04 hold 10s"
+    action: sleep
+    seconds: 10.0
+  - name: "cycle 04 lower 10cm"
+    action: cartesian_increment
+    request: *lower_10cm
+  - name: "cycle 04 wait 2s"
+    action: sleep
+    seconds: 2.0
+
+  - name: "cycle 05 lift 10cm"
+    action: cartesian_increment
+    request: *lift_10cm
+  - name: "cycle 05 hold 10s"
+    action: sleep
+    seconds: 10.0
+  - name: "cycle 05 lower 10cm"
+    action: cartesian_increment
+    request: *lower_10cm
+  - name: "cycle 05 wait 2s"
+    action: sleep
+    seconds: 2.0
+
+  - name: "cycle 06 lift 10cm"
+    action: cartesian_increment
+    request: *lift_10cm
+  - name: "cycle 06 hold 10s"
+    action: sleep
+    seconds: 10.0
+  - name: "cycle 06 lower 10cm"
+    action: cartesian_increment
+    request: *lower_10cm
+  - name: "cycle 06 wait 2s"
+    action: sleep
+    seconds: 2.0
+
+  - name: "cycle 07 lift 10cm"
+    action: cartesian_increment
+    request: *lift_10cm
+  - name: "cycle 07 hold 10s"
+    action: sleep
+    seconds: 10.0
+  - name: "cycle 07 lower 10cm"
+    action: cartesian_increment
+    request: *lower_10cm
+  - name: "cycle 07 wait 2s"
+    action: sleep
+    seconds: 2.0
+
+  - name: "cycle 08 lift 10cm"
+    action: cartesian_increment
+    request: *lift_10cm
+  - name: "cycle 08 hold 10s"
+    action: sleep
+    seconds: 10.0
+  - name: "cycle 08 lower 10cm"
+    action: cartesian_increment
+    request: *lower_10cm
+  - name: "cycle 08 wait 2s"
+    action: sleep
+    seconds: 2.0
+
+  - name: "cycle 09 lift 10cm"
+    action: cartesian_increment
+    request: *lift_10cm
+  - name: "cycle 09 hold 10s"
+    action: sleep
+    seconds: 10.0
+  - name: "cycle 09 lower 10cm"
+    action: cartesian_increment
+    request: *lower_10cm
+  - name: "cycle 09 wait 2s"
+    action: sleep
+    seconds: 2.0
+
+  - name: "cycle 10 lift 10cm"
+    action: cartesian_increment
+    request: *lift_10cm
+  - name: "cycle 10 hold 10s"
+    action: sleep
+    seconds: 10.0
+  - name: "cycle 10 lower 10cm"
+    action: cartesian_increment
+    request: *lower_10cm
+  - name: "cycle 10 wait 2s"
+    action: sleep
+    seconds: 2.0

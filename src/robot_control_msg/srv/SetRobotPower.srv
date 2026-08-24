@@ -1,0 +1,7 @@
+# 请求：设置机器人使能状态
+bool enable
+---
+# 响应：操作结果
+bool success
+string message
+

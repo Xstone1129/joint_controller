@@ -1,0 +1,7 @@
+/arm/erobot_controller_arm:
+  ros__parameters:
+    # The mock arm plant consumes position commands even though simulated
+    # drives deliberately remain power-disabled. The controller additionally
+    # requires the lower gateway's active Heavy lease for this SIM-only path.
+    heavy_v1:
+      allow_disabled_simulation_execution: true

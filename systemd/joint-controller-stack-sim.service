@@ -1,0 +1,34 @@
+[Unit]
+Description=Joint controller robot stack (simulation)
+After=network-online.target NetworkManager.service
+# RViz is a separate graphical process so the controller stack can remain
+# headless, but a managed SIM start must request it as part of the workspace.
+Wants=network-online.target joint-controller-rviz.service
+Before=joint-controller-rviz.service
+Conflicts=joint-controller-stack-real.service joint-controller-stack.service robot.service
+
+[Service]
+Type=simple
+User=user
+Group=user
+WorkingDirectory=/home/user/joint_controller
+Environment=ROS_DOMAIN_ID=2
+Environment=ROS_LOCALHOST_ONLY=0
+Environment=RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+Environment=CYCLONEDDS_URI=file:///home/user/joint_controller/cyclonedds.xml
+Environment=ROS_DISCOVERY_SERVER=
+Environment=FASTRTPS_DEFAULT_PROFILES_FILE=
+Environment=FASTDDS_BUILTIN_TRANSPORTS=
+Environment=FASTDDS_DEFAULT_PROFILES_FILE=
+Environment=SIM=1.0
+Environment=USE_RVIZ=false
+Environment=ENABLE_EFFORT_MODE_SWITCH=true
+ExecStart=/home/user/joint_controller/scripts/run_joint_controller_stack_sim.sh
+ExecStopPost=/usr/bin/rm -f /tmp/joint_controller_robot_command.lock
+TimeoutStartSec=30
+TimeoutStopSec=30
+KillSignal=SIGINT
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,17 @@
+# Runtime settings for the USB-FDCAN waist drive.
+waist_timeout_ms: 600
+waist_init_timeout_ms: 300
+waist_init_retry_count: 3
+waist_defer_bridge_release_on_deactivate: false
+
+# Vendor profile-position frame units, validated by the original waist driver.
+waist_profile_vel: 10
+waist_profile_acc: 2000
+waist_command_resend_hz: 100.0
+waist_feedback_sync_hz: 100.0
+command_epsilon_qugan: 0.002
+
+# joint_qugan units are radians. These limits are also present in the test URDF.
+joint_qugan_min_rad: 0.0
+joint_qugan_max_rad: 1.57
+qugan_sign: 1.0

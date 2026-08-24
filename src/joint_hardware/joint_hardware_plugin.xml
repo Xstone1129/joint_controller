@@ -1,0 +1,29 @@
+<library path="joint_hardware">
+  <class
+    name="joint_hardware/JointHardware"
+    type="joint_hardware::JointHardware"
+    base_class_type="hardware_interface::SystemInterface">
+    <description>
+      Transport-neutral ros2_control hardware interface for peripheral joint motors.
+      Set the simulate hardware parameter to true only for the generic non-lift plugin.
+    </description>
+  </class>
+  <class
+    name="joint_hardware/LiftHardware"
+    type="joint_hardware::LiftHardware"
+    base_class_type="hardware_interface::SystemInterface">
+    <description>
+      EtherCAT CiA 402 CSV lift hardware. Use ethercat_backend=mock for offline tests,
+      or ethercat_backend=etherlab when the optional IgH/EtherLab master is installed
+      and the slave identity/PDO/Distributed Clock configuration has been confirmed.
+    </description>
+  </class>
+  <class
+    name="joint_hardware/WaistHardware"
+    type="joint_hardware::WaistHardware"
+    base_class_type="hardware_interface::SystemInterface">
+    <description>
+      USB-FDCAN CANopen/vendor-frame ros2_control hardware interface for joint_qugan.
+    </description>
+  </class>
+</library>

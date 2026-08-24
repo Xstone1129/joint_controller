@@ -1,0 +1,10 @@
+string owner_id
+uint16 protocol_major
+uint16 protocol_minor
+uint32 layout_crc32
+---
+bool granted
+string lease_id
+float64 lease_timeout_ms
+uint64 initial_sequence
+string message

@@ -1,0 +1,117 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="joint_lift">
+  <xacro:macro
+    name="joint_lift_ros2_control"
+    params="hardware_config_file backend:=mock master_index:=2 cycle_ms:=10 expected_working_counter:=1
+            slave_alias:=0 slave_position:=0 slave_vendor_id:=0 slave_product_code:=0
+            ethercat_interface:=enp5s0 dc_assign_activate:=0 dc_sync0_shift_ns:=0
+            command_units_per_rev:=10000 encoder_counts_per_rev:=131072
+            lead_mm_per_rev:=10.0 lift_sign:=-1.0 position_min_m:=-1.0
+            position_max_m:=0.0 max_rpm:=360 brake_control_enabled:=false
+            position_limit_recovery_max_rpm:=300
+            limit_switch_enabled:=false limit_switch_positive_bit:=-1
+            limit_switch_negative_bit:=-1 limit_switch_active_high:=true
+            brake_release_wait_ms:=-1
+            brake_p04_37_ms:=150 brake_p04_39_rpm:=30 brake_p06_14_ms:=500
+            brake_p05_06_mode:=drive_default brake_p05_10_mode:=drive_default
+            auto_fault_reset:=true mode_mismatch_debounce_cycles:=5
+            use_persistent_zero_offset:=true
+            zero_offset_file:=/tmp/joint_hardware_lift_zero_offset.cfg">
+    <xacro:property name="lift_cfg" value="${xacro.load_yaml(hardware_config_file)}"/>
+    <ros2_control name="joint_lift_ethercat" type="system">
+      <hardware>
+        <plugin>joint_hardware/LiftHardware</plugin>
+        <param name="ethercat_backend">${backend}</param>
+        <param name="ethercat_master_index">${master_index}</param>
+        <param name="ethercat_cycle_ms">${cycle_ms}</param>
+        <param name="expected_working_counter">${expected_working_counter}</param>
+        <param name="slave_alias">${slave_alias}</param>
+        <param name="slave_position">${slave_position}</param>
+        <param name="slave_vendor_id">${slave_vendor_id}</param>
+        <param name="slave_product_code">${slave_product_code}</param>
+        <param name="ethercat_interface">${ethercat_interface}</param>
+        <param name="pdo_rx_logical_address">0</param>
+        <param name="pdo_tx_logical_address">0</param>
+        <param name="pdo_rx_bytes">8</param>
+        <param name="pdo_tx_bytes">17</param>
+        <param name="dc_assign_activate">${dc_assign_activate}</param>
+        <param name="dc_sync0_shift_ns">${dc_sync0_shift_ns}</param>
+        <param name="motor_id">LVM08008H3G3-M17</param>
+        <param name="lead_mm_per_rev">${lead_mm_per_rev}</param>
+        <param name="lift_sign">${lift_sign}</param>
+        <param name="command_units_per_rev">${command_units_per_rev}</param>
+        <param name="encoder_counts_per_rev">${encoder_counts_per_rev}</param>
+        <param name="position_min_m">${position_min_m}</param>
+        <param name="position_max_m">${position_max_m}</param>
+        <param name="max_rpm">${max_rpm}</param>
+        <param name="position_limit_recovery_max_rpm">${position_limit_recovery_max_rpm}</param>
+        <param name="brake_control_enabled">${brake_control_enabled}</param>
+        <param name="limit_switch_enabled">${limit_switch_enabled}</param>
+        <param name="limit_switch_positive_bit">${limit_switch_positive_bit}</param>
+        <param name="limit_switch_negative_bit">${limit_switch_negative_bit}</param>
+        <param name="limit_switch_active_high">${limit_switch_active_high}</param>
+        <param name="brake_release_wait_ms">${brake_release_wait_ms}</param>
+        <param name="brake_p04_37_ms">${brake_p04_37_ms}</param>
+        <param name="brake_p04_39_rpm">${brake_p04_39_rpm}</param>
+        <param name="brake_p06_14_ms">${brake_p06_14_ms}</param>
+        <param name="brake_p05_06_mode">${brake_p05_06_mode}</param>
+        <param name="brake_p05_10_mode">${brake_p05_10_mode}</param>
+        <param name="auto_fault_reset">${auto_fault_reset}</param>
+        <param name="zero_offset_file">${zero_offset_file}</param>
+        <param name="use_persistent_zero_offset">${use_persistent_zero_offset}</param>
+        <param name="feedback_timeout_ms">${lift_cfg['feedback_timeout_ms']}</param>
+        <param name="lift_velocity_kp_rpm_per_m">${lift_cfg['lift_velocity_kp_rpm_per_m']}</param>
+        <param name="lift_velocity_kd_rpm_per_mps">${lift_cfg['lift_velocity_kd_rpm_per_mps']}</param>
+        <param name="lift_velocity_deadband_m">${lift_cfg['lift_velocity_deadband_m']}</param>
+        <param name="lift_velocity_slowdown_distance_m">${lift_cfg['lift_velocity_slowdown_distance_m']}</param>
+        <param name="lift_velocity_stop_window_m">${lift_cfg['lift_velocity_stop_window_m']}</param>
+        <param name="lift_velocity_stop_target_stable_ms">${lift_cfg['lift_velocity_stop_target_stable_ms']}</param>
+        <param name="lift_velocity_stop_window_max_rpm">${lift_cfg['lift_velocity_stop_window_max_rpm']}</param>
+        <param name="lift_velocity_feedback_filter_alpha">${lift_cfg['lift_velocity_feedback_filter_alpha']}</param>
+        <param name="lift_velocity_command_epsilon_rpm">${lift_cfg['lift_velocity_command_epsilon_rpm']}</param>
+        <param name="lift_velocity_slew_rpm_per_s">${lift_cfg['lift_velocity_slew_rpm_per_s']}</param>
+        <param name="lift_velocity_stop_slew_rpm_per_s">${lift_cfg['lift_velocity_stop_slew_rpm_per_s']}</param>
+        <param name="lift_velocity_brake_accel_rpm_per_s">${lift_cfg['lift_velocity_brake_accel_rpm_per_s']}</param>
+        <param name="lift_velocity_overshoot_guard_window_m">${lift_cfg['lift_velocity_overshoot_guard_window_m']}</param>
+        <param name="lift_velocity_overshoot_recovery_max_rpm">${lift_cfg['lift_velocity_overshoot_recovery_max_rpm']}</param>
+        <param name="lift_velocity_direct_stop_in_stop_window">${lift_cfg['lift_velocity_direct_stop_in_stop_window']}</param>
+        <param name="lift_stationary_velocity_threshold_mps">${lift_cfg['lift_stationary_velocity_threshold_mps']}</param>
+        <param name="command_epsilon_m">${lift_cfg['command_epsilon_m']}</param>
+        <param name="max_feedback_jump_m">${lift_cfg['max_feedback_jump_m']}</param>
+        <param name="max_feedback_velocity_mps">${lift_cfg['max_feedback_velocity_mps']}</param>
+        <param name="feedback_velocity_tolerance_mps">${lift_cfg['feedback_velocity_tolerance_mps']}</param>
+        <param name="lift_motion_command_period_ms">${lift_cfg['lift_motion_command_period_ms']}</param>
+        <param name="lift_startup_motion_guard_enabled">${lift_cfg['lift_startup_motion_guard_enabled']}</param>
+        <param name="lift_startup_motion_guard_ms">${lift_cfg['lift_startup_motion_guard_ms']}</param>
+        <param name="reset_velocity_rpm">${lift_cfg['reset_velocity_rpm']}</param>
+        <param name="reset_velocity_period_ms">${lift_cfg['reset_velocity_period_ms']}</param>
+        <param name="reset_velocity_timeout_ms">${lift_cfg['reset_velocity_timeout_ms']}</param>
+        <param name="reset_velocity_debug_enabled">${lift_cfg['reset_velocity_debug_enabled']}</param>
+        <param name="homing_method">${lift_cfg['homing_method']}</param>
+        <param name="homing_speed_high_units_s">${lift_cfg['homing_speed_high_units_s']}</param>
+        <param name="homing_speed_low_units_s">${lift_cfg['homing_speed_low_units_s']}</param>
+        <param name="homing_acceleration_units_s2">${lift_cfg['homing_acceleration_units_s2']}</param>
+        <param name="homing_offset_units">${lift_cfg['homing_offset_units']}</param>
+        <param name="homing_timeout_ms">${lift_cfg['homing_timeout_ms']}</param>
+        <param name="drive_zero_timeout_ms">${lift_cfg['drive_zero_timeout_ms']}</param>
+        <param name="max_fault_reset_attempts">${lift_cfg['max_fault_reset_attempts']}</param>
+        <param name="fault_reset_backoff_ms">${lift_cfg['fault_reset_backoff_ms']}</param>
+        <param name="mode_mismatch_debounce_cycles">${mode_mismatch_debounce_cycles}</param>
+      </hardware>
+      <joint name="joint_motor">
+        <command_interface name="position"/>
+        <command_interface name="velocity"/>
+        <command_interface name="acceleration"/>
+        <command_interface name="power_enable"/>
+        <state_interface name="position"/>
+        <state_interface name="velocity"/>
+        <state_interface name="status"/>
+        <state_interface name="error_code"/>
+        <state_interface name="mode"/>
+        <state_interface name="brake_unlocked"/>
+        <state_interface name="digital_inputs"/>
+        <state_interface name="power_enable"/>
+      </joint>
+    </ros2_control>
+  </xacro:macro>
+</robot>

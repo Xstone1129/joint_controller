@@ -1,0 +1,9 @@
+<library path="Robot_arm_hardware_interface">
+    <class name="Robot_arm_hardware_interface/Robot_arm_Ethercat_Hardware"
+         type="Robot_arm_hardware_interface::Robot_arm_Ethercat_Hardware"
+         base_class_type="hardware_interface::SystemInterface">
+    <description>
+      The ros2_control robot with 14 separate actuators by right and left which can be controlled by 14 different endpoints.
+    </description>
+  </class>
+</library>

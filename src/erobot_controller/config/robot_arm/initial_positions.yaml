@@ -1,0 +1,21 @@
+# Default initial positions for eRobot5's ros2_control fake system
+
+initial_positions:
+  ljoint1: 0 
+  ljoint2: 0
+  ljoint3: 0
+  ljoint4: -1.3
+  ljoint5: 0
+  ljoint6: 0
+  ljoint7: 0
+  rjoint1: 0
+  rjoint2: 0
+  rjoint3: 0
+  rjoint4: 1.3
+  rjoint5: 0
+  rjoint6: 0
+  rjoint7: 0
+  
+  
+  
+  

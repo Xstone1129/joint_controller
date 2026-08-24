@@ -1,0 +1,35 @@
+# 笛卡尔空间增量控制服务
+# 请求：增量控制命令
+
+# 左臂增量控制
+float64 lx
+float64 ly
+float64 lz
+float64 lroll
+float64 lpitch
+float64 lyaw
+float64 lqx
+float64 lqy
+float64 lqz
+float64 lqw
+
+# 右臂增量控制
+float64 rx
+float64 ry
+float64 rz
+float64 rroll
+float64 rpitch
+float64 ryaw
+float64 rqx
+float64 rqy
+float64 rqz
+float64 rqw
+
+# 速度和加速度参数
+float64 vel
+float64 acc
+
+---
+# 响应：操作结果
+bool success
+string message

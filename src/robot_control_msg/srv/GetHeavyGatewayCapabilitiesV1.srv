@@ -1,0 +1,25 @@
+uint16 requested_protocol_major
+---
+bool compatible
+uint16 protocol_major
+uint16 protocol_minor
+uint32 layout_crc32
+string layout_sha256
+uint16 resource_count
+float64 command_rate_hz
+float64 feedback_rate_hz
+float64 command_timeout_ms
+float64 lease_timeout_ms
+bool supports_position
+bool supports_velocity_feedforward
+bool supports_acceleration_feedforward
+bool supports_effort_command
+bool supports_mit_stream
+bool has_end_effectors
+bool hardware_calibration_required
+bool arm_power_is_torque_enable
+bool arm_power_affects_lift
+bool lift_brake_state_required
+bool lift_brake_command_optional
+string interface_schema_sha256
+string message

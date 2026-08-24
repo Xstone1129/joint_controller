@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:macro name="joint_waist_ros2_control"
+    params="name waist_port waist_node_id:=1 waist_channel:=2 waist_bitrate:=5000000 serial_baudrate:=2000000">
+    <ros2_control name="${name}" type="system">
+      <hardware>
+        <plugin>joint_hardware/WaistHardware</plugin>
+        <param name="waist_hardware_config">$(find joint_hardware)/config/waist_hardware.yaml</param>
+        <param name="waist_port">${waist_port}</param>
+        <param name="waist_node_id">${waist_node_id}</param>
+        <param name="waist_channel">${waist_channel}</param>
+        <param name="waist_bitrate">${waist_bitrate}</param>
+        <param name="serial_baudrate">${serial_baudrate}</param>
+      </hardware>
+      <joint name="joint_qugan">
+        <command_interface name="position"/>
+        <command_interface name="velocity"/>
+        <command_interface name="acceleration"/>
+        <state_interface name="position"/>
+        <state_interface name="velocity"/>
+      </joint>
+    </ros2_control>
+  </xacro:macro>
+</robot>

@@ -1,0 +1,76 @@
+#ifndef ROBOT_CONTROL__WORKSPACE_SUPERVISOR_POLICY_HPP_
+#define ROBOT_CONTROL__WORKSPACE_SUPERVISOR_POLICY_HPP_
+
+#include <algorithm>
+#include <cstdint>
+#include <string>
+#include <vector>
+
+#include "robot_control_msg/msg/arm_power_status.hpp"
+#include "robot_control_msg/msg/workspace_status.hpp"
+
+namespace robot_control::workspace_supervisor_policy
+{
+
+inline std::vector<std::string> collect_startup_arm_power_issues(
+  const robot_control_msg::msg::ArmPowerStatus & status,
+  bool require_startup_power_off)
+{
+  if (!require_startup_power_off) {
+    return {};
+  }
+
+  std::vector<std::string> enabled_drives;
+  const auto count = std::min(status.joint_names.size(), status.enabled.size());
+  for (std::size_t index = 0; index < count; ++index) {
+    if (status.enabled[index]) {
+      enabled_drives.emplace_back(status.joint_names[index]);
+    }
+  }
+
+  if (!status.command_enabled && !status.all_enabled && enabled_drives.empty()) {
+    return {};
+  }
+
+  std::string names;
+  for (std::size_t index = 0; index < enabled_drives.size(); ++index) {
+    if (index != 0U) {
+      names += ", ";
+    }
+    names += enabled_drives[index];
+  }
+  return {
+    "REAL startup is not in a confirmed power-off state: command_enabled=" +
+    std::string(status.command_enabled ? "true" : "false") + " all_enabled=" +
+    std::string(status.all_enabled ? "true" : "false") + " enabled_drives=[" + names + "]"};
+}
+
+inline robot_control_msg::msg::WorkspaceStatus evaluate_workspace_health(
+  bool active, std::uint8_t mode, const std::vector<std::string> & issues,
+  const std::string & healthy_message = "workspace status heartbeat")
+{
+  robot_control_msg::msg::WorkspaceStatus status;
+  status.mode = active ? mode : robot_control_msg::msg::WorkspaceStatus::UNKNOWN;
+  status.state = active ?
+    (issues.empty() ? robot_control_msg::msg::WorkspaceStatus::RUNNING :
+    robot_control_msg::msg::WorkspaceStatus::ERROR) :
+    (issues.empty() ? robot_control_msg::msg::WorkspaceStatus::STOPPED :
+    robot_control_msg::msg::WorkspaceStatus::ERROR);
+  status.accepted = issues.empty();
+  if (issues.empty()) {
+    status.message = healthy_message;
+  } else {
+    status.message = "workspace unhealthy: ";
+    for (std::size_t index = 0; index < issues.size(); ++index) {
+      if (index != 0U) {
+        status.message += "; ";
+      }
+      status.message += issues[index];
+    }
+  }
+  return status;
+}
+
+}  // namespace robot_control::workspace_supervisor_policy
+
+#endif  // ROBOT_CONTROL__WORKSPACE_SUPERVISOR_POLICY_HPP_

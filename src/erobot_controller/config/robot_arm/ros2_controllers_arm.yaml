@@ -1,0 +1,139 @@
+# This config file is used by ros2_control
+/arm/controller_manager:
+  ros__parameters:
+    update_rate: 500
+
+    joint_state_broadcaster_arm:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    erobot_controller_arm:
+      type: erobot_controller_arm/RobotController_arm
+
+/arm/erobot_controller_arm:
+  ros__parameters:
+    joints:
+      - ljoint1
+      - ljoint2
+      - ljoint3
+      - ljoint4
+      - ljoint5
+      - ljoint6
+      - ljoint7
+      - rjoint1
+      - rjoint2
+      - rjoint3
+      - rjoint4
+      - rjoint5
+      - rjoint6
+      - rjoint7
+
+    command_interfaces:
+      - position
+      - velocity
+      - effort
+      - mode
+      - power_enable
+
+    state_interfaces:
+      - position
+      - velocity
+      - effort
+      - motor_encoder_0
+      - motor_encoder_1
+      - status
+      - error_code
+      - power_enable
+
+    joint_limit_guard:
+      enabled: true
+      soft_zone_deg: 6.0
+      stiffness_nm_per_rad: 120.0
+      damping_nm_s_per_rad: 6.0
+      overrun_stiffness_scale: 3.0
+      overrun_damping_scale: 2.0
+      max_torque_ratio: 0.35
+
+    heavy_v1:
+      allow_disabled_simulation_execution: false
+      max_velocity_rad_s: 0.3
+      max_acceleration_rad_s2: 1.0
+
+    motor_coefficients:
+      ljoint1:
+        kp: 10.0
+        kd: 0.5
+        max_effort: 50.0
+        Torqueconstant: 2.98
+      ljoint2:
+        kp: 12.0
+        kd: 0.6
+        max_effort: 55.0
+        Torqueconstant: 2.98
+      ljoint3:
+        kp: 8.0
+        kd: 0.4
+        max_effort: 45.0
+        Torqueconstant: 5.7
+      ljoint4:
+        kp: 6.0
+        kd: 0.3
+        max_effort: 35.0
+        Torqueconstant: 5.7
+      ljoint5:
+        kp: 5.0
+        kd: 0.25
+        max_effort: 30.0
+        Torqueconstant: 14.28
+      ljoint6:
+        kp: 4.0
+        kd: 0.2
+        max_effort: 25.0
+        Torqueconstant: 14.28
+      ljoint7:
+        kp: 3.0
+        kd: 0.15
+        max_effort: 20.0
+        Torqueconstant: 14.28
+      rjoint1:
+        kp: 10.0
+        kd: 0.5
+        max_effort: 50.0
+        Torqueconstant: 2.98
+      rjoint2:
+        kp: 12.0
+        kd: 0.6
+        max_effort: 55.0
+        Torqueconstant: 2.98
+      rjoint3:
+        kp: 8.0
+        kd: 0.4
+        max_effort: 45.0
+        Torqueconstant: 5.7
+      rjoint4:
+        kp: 6.0
+        kd: 0.3
+        max_effort: 35.0
+        Torqueconstant: 5.7
+      rjoint5:
+        kp: 5.0
+        kd: 0.25
+        max_effort: 30.0
+        Torqueconstant: 14.28
+      rjoint6:
+        kp: 4.0
+        kd: 0.2
+        max_effort: 25.0
+        Torqueconstant: 14.28
+      rjoint7:
+        kp: 3.0
+        kd: 0.15
+        max_effort: 20.0
+        Torqueconstant: 14.28
+
+    ee_links:
+      left: "lee_link"
+      right: "ree_link"
+    workpiece_offset:
+      x: 0.0
+      y: 0.0
+      z: 0.0

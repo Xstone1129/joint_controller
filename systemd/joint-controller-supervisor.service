@@ -1,0 +1,24 @@
+[Unit]
+Description=ROS 2 workspace supervisor for Jetson control
+Wants=network-online.target robot-lower-gateway.service
+After=network-online.target NetworkManager.service robot-lower-gateway.service
+
+[Service]
+Type=simple
+User=root
+Environment=ROS_DOMAIN_ID=2
+Environment=ROS_LOCALHOST_ONLY=0
+Environment=RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+Environment=CYCLONEDDS_URI=file:///home/user/joint_controller/cyclonedds.xml
+Environment=ROS_DISCOVERY_SERVER=
+Environment=FASTRTPS_DEFAULT_PROFILES_FILE=
+Environment=FASTDDS_BUILTIN_TRANSPORTS=
+Environment=FASTDDS_DEFAULT_PROFILES_FILE=
+Environment=WORKSPACE_CONTROL_ALLOWED_SOURCE=jetson_192_168_2_10
+Environment=WORKSPACE_STATUS_SOURCE=ubuntu_192_168_2_20
+ExecStart=/home/user/joint_controller/scripts/run_workspace_supervisor.sh
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

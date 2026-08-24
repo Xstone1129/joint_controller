@@ -1,0 +1,18 @@
+# 笛卡尔空间多路点绝对路径控制服务
+
+# 左臂绝对 waypoint（TCP 位姿）
+geometry_msgs/Pose[] left_waypoints
+float64[] left_blend_radii
+
+# 右臂绝对 waypoint（TCP 位姿）
+geometry_msgs/Pose[] right_waypoints
+float64[] right_blend_radii
+
+# 速度和加速度参数
+float64 vel
+float64 acc
+
+---
+# 响应：操作结果
+bool success
+string message

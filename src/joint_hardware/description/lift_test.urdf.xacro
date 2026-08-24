@@ -1,0 +1,85 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="joint_lift_test">
+  <xacro:arg name="backend" default="mock"/>
+  <xacro:arg name="hardware_config_file" default="$(find joint_hardware)/config/lift_hardware.yaml"/>
+  <xacro:arg name="master_index" default="2"/>
+  <xacro:arg name="cycle_ms" default="10"/>
+  <xacro:arg name="expected_working_counter" default="1"/>
+  <xacro:arg name="slave_alias" default="0"/>
+  <xacro:arg name="slave_position" default="0"/>
+  <xacro:arg name="slave_vendor_id" default="0"/>
+  <xacro:arg name="slave_product_code" default="0"/>
+  <xacro:arg name="ethercat_interface" default="enp5s0"/>
+  <xacro:arg name="dc_assign_activate" default="0"/>
+  <xacro:arg name="dc_sync0_shift_ns" default="0"/>
+  <xacro:arg name="command_units_per_rev" default="10000"/>
+  <xacro:arg name="encoder_counts_per_rev" default="131072"/>
+  <xacro:arg name="lead_mm_per_rev" default="10.0"/>
+  <xacro:arg name="lift_sign" default="-1.0"/>
+  <xacro:arg name="position_min_m" default="-1.0"/>
+  <xacro:arg name="position_max_m" default="0.0"/>
+  <xacro:arg name="max_rpm" default="360"/>
+  <xacro:arg name="position_limit_recovery_max_rpm" default="300"/>
+  <xacro:arg name="brake_control_enabled" default="false"/>
+  <xacro:arg name="limit_switch_enabled" default="false"/>
+  <xacro:arg name="limit_switch_positive_bit" default="-1"/>
+  <xacro:arg name="limit_switch_negative_bit" default="-1"/>
+  <xacro:arg name="limit_switch_active_high" default="true"/>
+  <xacro:arg name="brake_release_wait_ms" default="-1"/>
+  <xacro:arg name="brake_p04_37_ms" default="150"/>
+  <xacro:arg name="brake_p04_39_rpm" default="30"/>
+  <xacro:arg name="brake_p06_14_ms" default="500"/>
+  <xacro:arg name="brake_p05_06_mode" default="drive_default"/>
+  <xacro:arg name="brake_p05_10_mode" default="drive_default"/>
+  <xacro:arg name="auto_fault_reset" default="true"/>
+  <xacro:arg name="mode_mismatch_debounce_cycles" default="5"/>
+  <xacro:arg name="use_persistent_zero_offset" default="false"/>
+  <xacro:arg name="zero_offset_file" default="/tmp/joint_hardware_lift_zero_offset.cfg"/>
+
+  <xacro:include filename="$(find joint_hardware)/description/lift.ros2_control.xacro"/>
+  <xacro:joint_lift_ros2_control
+    hardware_config_file="$(arg hardware_config_file)"
+    backend="$(arg backend)"
+    master_index="$(arg master_index)"
+    cycle_ms="$(arg cycle_ms)"
+    expected_working_counter="$(arg expected_working_counter)"
+    slave_alias="$(arg slave_alias)"
+    slave_position="$(arg slave_position)"
+    slave_vendor_id="$(arg slave_vendor_id)"
+    slave_product_code="$(arg slave_product_code)"
+    ethercat_interface="$(arg ethercat_interface)"
+    dc_assign_activate="$(arg dc_assign_activate)"
+    dc_sync0_shift_ns="$(arg dc_sync0_shift_ns)"
+    command_units_per_rev="$(arg command_units_per_rev)"
+    encoder_counts_per_rev="$(arg encoder_counts_per_rev)"
+    lead_mm_per_rev="$(arg lead_mm_per_rev)"
+    lift_sign="$(arg lift_sign)"
+    position_min_m="$(arg position_min_m)"
+    position_max_m="$(arg position_max_m)"
+    max_rpm="$(arg max_rpm)"
+    position_limit_recovery_max_rpm="$(arg position_limit_recovery_max_rpm)"
+    brake_control_enabled="$(arg brake_control_enabled)"
+    limit_switch_enabled="$(arg limit_switch_enabled)"
+    limit_switch_positive_bit="$(arg limit_switch_positive_bit)"
+    limit_switch_negative_bit="$(arg limit_switch_negative_bit)"
+    limit_switch_active_high="$(arg limit_switch_active_high)"
+    brake_release_wait_ms="$(arg brake_release_wait_ms)"
+    brake_p04_37_ms="$(arg brake_p04_37_ms)"
+    brake_p04_39_rpm="$(arg brake_p04_39_rpm)"
+    brake_p06_14_ms="$(arg brake_p06_14_ms)"
+    brake_p05_06_mode="$(arg brake_p05_06_mode)"
+    brake_p05_10_mode="$(arg brake_p05_10_mode)"
+    auto_fault_reset="$(arg auto_fault_reset)"
+    mode_mismatch_debounce_cycles="$(arg mode_mismatch_debounce_cycles)"
+    use_persistent_zero_offset="$(arg use_persistent_zero_offset)"
+    zero_offset_file="$(arg zero_offset_file)"/>
+
+  <link name="lift_base"/>
+  <link name="lift_carriage"/>
+  <joint name="joint_motor" type="prismatic">
+    <parent link="lift_base"/>
+    <child link="lift_carriage"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1.0" upper="0.0" velocity="0.060" effort="1000.0"/>
+  </joint>
+</robot>

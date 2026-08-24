@@ -1,0 +1,709 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This URDF was automatically created by SolidWorks to URDF Exporter! Originally created by Stephen Brawner (brawner@gmail.com) 
+     Commit Version: 1.6.0-1-g15f4949  Build Version: 1.6.7594.29634
+     For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
+<robot
+  name="dual_arm">
+  <link
+    name="base_link">
+    <inertial>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <mass
+        value="0.29324" />
+      <inertia
+        ixx="0.00029756"
+        ixy="-6.9587E-20"
+        ixz="1.5542E-21"
+        iyy="0.0017453"
+        iyz="2.2537E-22"
+        izz="0.002038" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <cylinder radius = "0.1" length = "0.5"  />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+  </link>
+  <link
+    name="llink1">
+    <inertial>
+      <origin
+        xyz="0.041639 -9.5415E-08 0.078526"
+        rpy="0 0 0" />
+      <mass
+        value="0.24987" />
+      <inertia
+        ixx="0.0006271"
+        ixy="1.91E-10"
+        ixz="-0.00020699"
+        iyy="0.00072937"
+        iyz="-5.8334E-10"
+        izz="0.00053567" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <cylinder radius = "0.05" length = "0.2"  />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="ljoint1"
+    type="revolute">
+    <origin
+      xyz="-0.10762 0.045 0.22804"
+      rpy="0 -1.51839 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="llink1" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="llink2">
+    <inertial>
+      <origin
+        xyz="-1.0311E-05 -0.065331 0.0058056"
+        rpy="0 0 0" />
+      <mass
+        value="0.26286" />
+      <inertia
+        ixx="0.0021103"
+        ixy="-9.1802E-09"
+        ixz="-3.0245E-08"
+        iyy="0.00073404"
+        iyz="-0.00010005"
+        izz="0.0021757" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <cylinder radius = "0.03" length = "0.1"  />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="ljoint2"
+    type="revolute">
+    <origin
+      xyz="0 0 0.1265"
+      rpy="0 1.57079 1.57079 " />
+    <parent
+      link="llink1" />
+    <child
+      link="llink2" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="llink3">
+    <inertial>
+      <origin
+        xyz="4.0057E-08 0.0035526 0.30728"
+        rpy="0 0 0" />
+      <mass
+        value="0.16256" />
+      <inertia
+        ixx="0.0010114"
+        ixy="5.8972E-10"
+        ixz="-1.6559E-10"
+        iyy="0.0010189"
+        iyz="-4.2106E-05"
+        izz="0.00031705" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0.15"
+        rpy="0 0 0" />
+      <geometry>
+        <cylinder radius = "0.05" length = "0.3"  />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="ljoint3"
+    type="revolute">
+    <origin
+      xyz="0 0 0"
+      rpy="-1.5708 0 0" />
+    <parent
+      link="llink2" />
+    <child
+      link="llink3" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="llink4">
+    <inertial>
+      <origin
+        xyz="1.1177E-07 -0.074915 0.036559"
+        rpy="0 0 0" />
+      <mass
+        value="0.19929" />
+      <inertia
+        ixx="0.00072501"
+        ixy="2.5788E-10"
+        ixz="-9.3888E-11"
+        iyy="0.00027207"
+        iyz="-0.00017365"
+        izz="0.00066506" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <cylinder radius = "0.03" length = "0.1"  />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="ljoint4"
+    type="revolute">
+    <origin
+      xyz="0 0 0.38"
+      rpy="1.5708 0 0" />
+    <parent
+      link="llink3" />
+    <child
+      link="llink4" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="llink5">
+    <inertial>
+      <origin
+        xyz="2.1676E-06 0.0070445 0.19825"
+        rpy="0 0 0" />
+      <mass
+        value="0.066574" />
+      <inertia
+        ixx="0.00013147"
+        ixy="-2.7479E-09"
+        ixz="1.8702E-09"
+        iyy="0.00013187"
+        iyz="-7.9202E-06"
+        izz="0.0001047" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 -0.1"
+        rpy="0 0 0" />
+      <geometry>
+        <cylinder radius = "0.05" length = "0.2"  />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="ljoint5"
+    type="revolute">
+    <origin
+      xyz="0 0 0"
+      rpy="1.5708 0 0" />
+    <parent
+      link="llink4" />
+    <child
+      link="llink5" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="llink6">
+    <inertial>
+      <origin
+        xyz="-0.0039441 -0.068911 0.030139"
+        rpy="0 0 0" />
+      <mass
+        value="0.10811" />
+      <inertia
+        ixx="0.00019728"
+        ixy="6.4772E-12"
+        ixz="-3.1094E-06"
+        iyy="0.00010812"
+        iyz="-9.3227E-07"
+        izz="0.00020592" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <cylinder radius = "0.05" length = "0.1"  />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="ljoint6"
+    type="revolute">
+    <origin
+      xyz="0 0 -0.215"
+      rpy="-1.5708 1.5708 0" />
+    <parent
+      link="llink5" />
+    <child
+      link="llink6" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="llink7">
+    <inertial>
+      <origin
+        xyz="3.1729E-09 -0.028673 0.033919"
+        rpy="0 0 0" />
+      <mass
+        value="0.044605" />
+      <inertia
+        ixx="5.762E-05"
+        ixy="6.3373E-12"
+        ixz="2.7464E-12"
+        iyy="3.3691E-05"
+        iyz="-1.6616E-05"
+        izz="5.028E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <cylinder radius = "0.05" length = "0.1"  />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="ljoint7"
+    type="revolute">
+    <origin
+      xyz="0.095 0 0"
+      rpy="1.5708 1.5708 0" />
+    <parent
+      link="llink6" />
+    <child
+      link="llink7" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="rlink1">
+    <inertial>
+      <origin
+        xyz="0.041639 -9.5415E-08 0.078526"
+        rpy="0 0 0" />
+      <mass
+        value="0.24987" />
+      <inertia
+        ixx="0.0006271"
+        ixy="1.91E-10"
+        ixz="-0.00020699"
+        iyy="0.00072937"
+        iyz="-5.8334E-10"
+        izz="0.00053567" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <cylinder radius = "0.05" length = "0.2"  />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="rjoint1"
+    type="revolute">
+    <origin
+      xyz="0.10762 0.045 0.22804"
+      rpy="0 -1.6232 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="rlink1" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="rlink2">
+    <inertial>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <mass
+        value="0.26286" />
+      <inertia
+        ixx="0.0021103"
+        ixy="-9.1802E-09"
+        ixz="-3.0245E-08"
+        iyy="0.00073404"
+        iyz="-0.00010005"
+        izz="0.0021757" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <cylinder radius = "0.03" length = "0.1"  />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="rjoint2"
+    type="revolute">
+    <origin
+      xyz="0 0 -0.1265"
+      rpy="0 1.57079 1.57079 " />
+    <parent
+      link="rlink1" />
+    <child
+      link="rlink2" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="rlink3">
+    <inertial>
+      <origin
+        xyz="4.0057E-08 0.0035526 0.30728"
+        rpy="0 0 0" />
+      <mass
+        value="0.16256" />
+      <inertia
+        ixx="0.0010114"
+        ixy="5.8972E-10"
+        ixz="-1.6559E-10"
+        iyy="0.0010189"
+        iyz="-4.2106E-05"
+        izz="0.00031705" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0.15"
+        rpy="0 0 0" />
+      <geometry>
+        <cylinder radius = "0.05" length = "0.3"  />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="rjoint3"
+    type="revolute">
+    <origin
+      xyz="0 0 0"
+      rpy="-1.5708 0 0" />
+    <parent
+      link="rlink2" />
+    <child
+      link="rlink3" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="rlink4">
+    <inertial>
+      <origin
+        xyz="1.1177E-07 -0.074915 0.036559"
+        rpy="0 0 0" />
+      <mass
+        value="0.19929" />
+      <inertia
+        ixx="0.00072501"
+        ixy="2.5788E-10"
+        ixz="-9.3888E-11"
+        iyy="0.00027207"
+        iyz="-0.00017365"
+        izz="0.00066506" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <cylinder radius = "0.03" length = "0.1"  />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="rjoint4"
+    type="revolute">
+    <origin
+      xyz="0 0 0.38"
+      rpy="1.5708 0 0" />
+    <parent
+      link="rlink3" />
+    <child
+      link="rlink4" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="rlink5">
+    <inertial>
+      <origin
+        xyz="2.1676E-06 0.0070445 0.19825"
+        rpy="0 0 0" />
+      <mass
+        value="0.066574" />
+      <inertia
+        ixx="0.00013147"
+        ixy="-2.7479E-09"
+        ixz="1.8702E-09"
+        iyy="0.00013187"
+        iyz="-7.9202E-06"
+        izz="0.0001047" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 -0.1"
+        rpy="0 0 0" />
+      <geometry>
+        <cylinder radius = "0.05" length = "0.2"  />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="rjoint5"
+    type="revolute">
+    <origin
+      xyz="0 0 0"
+      rpy="1.5708 0 0" />
+    <parent
+      link="rlink4" />
+    <child
+      link="rlink5" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="rlink6">
+    <inertial>
+      <origin
+        xyz="-0.0039441 -0.068911 0.030139"
+        rpy="0 0 0" />
+      <mass
+        value="0.10811" />
+      <inertia
+        ixx="0.00019728"
+        ixy="6.4772E-12"
+        ixz="-3.1094E-06"
+        iyy="0.00010812"
+        iyz="-9.3227E-07"
+        izz="0.00020592" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <cylinder radius = "0.05" length = "0.1"  />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="rjoint6"
+    type="revolute">
+    <origin
+      xyz="0 0 -0.215"
+      rpy="-1.5708 1.5708 0" />
+    <parent
+      link="rlink5" />
+    <child
+      link="rlink6" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="rlink7">
+    <inertial>
+      <origin
+        xyz="3.1729E-09 -0.028673 0.033919"
+        rpy="0 0 0" />
+      <mass
+        value="0.044605" />
+      <inertia
+        ixx="5.762E-05"
+        ixy="6.3373E-12"
+        ixz="2.7464E-12"
+        iyy="3.3691E-05"
+        iyz="-1.6616E-05"
+        izz="5.028E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <cylinder radius = "0.05" length = "0.1"  />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="rjoint7"
+    type="revolute">
+    <origin
+      xyz="0.095 0 0"
+      rpy="1.5708 1.5708 0" />
+    <parent
+      link="rlink6" />
+    <child
+      link="rlink7" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+</robot>

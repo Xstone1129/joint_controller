@@ -1,0 +1,56 @@
+name: emergency_stop_test
+power_on_at_start: true
+power_off_at_end: false
+
+topics:
+  power: /robot_poweron
+  joint_absolute: /arm_joint_absolute_cmd
+  joint_state: /arm/joint_states
+  motion_status: /arm/arm_controller/motion_status
+
+defaults:
+  joint_vel: 0.03
+  joint_acc: 0.03
+  motion_timeout: 120.0
+  position_tolerance: 0.05
+  wait_motion: true
+  confirm_after: false
+  publisher_match_timeout: 5.0
+
+initial_pose:
+  l1: 0.0
+  l2: 0.0
+  l3: 0.0
+  l4: 0.0
+  l5: 0.0
+  l6: 0.0
+  l7: 0.0
+  r1: 0.0
+  r2: 0.0
+  r3: 0.0
+  r4: 0.0
+  r5: 0.0
+  r6: 0.0
+  r7: 0.0
+
+poses:
+  慢速大动作:
+    l1: 0.0
+    l2: 1.4
+    l3: 0.0
+    l4: -1.4
+    l5: 0.0
+    l6: 0.0
+    l7: 0.0
+    r1: 0.0
+    r2: -1.4
+    r3: 0.0
+    r4: 1.4
+    r5: 0.0
+    r6: 0.0
+    r7: 0.0
+
+steps:
+  - name: 慢速运动到大姿态
+    action: joint
+    pose: 慢速大动作

@@ -1,0 +1,9 @@
+<library path="erobot_controller">
+  <class name="erobot_controller_arm/RobotController_arm"
+        type="erobot_controller_arm::RobotController_arm"
+        base_class_type="controller_interface::ControllerInterface">
+    <description>
+      E-Robot specialized arm controller for plan
+    </description>
+  </class>
+</library>

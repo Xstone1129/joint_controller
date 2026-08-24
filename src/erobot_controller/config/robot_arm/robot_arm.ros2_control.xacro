@@ -1,0 +1,59 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+    <xacro:macro name="robot_arm_ros2_control" params="name initial_positions_file sim:=0.0">
+        <xacro:property name="initial_positions" value="${xacro.load_yaml(initial_positions_file)['initial_positions']}"/>
+
+        <ros2_control name="${name}" type="system">
+            <hardware>
+                <plugin>Robot_arm_hardware_interface/Robot_arm_Ethercat_Hardware</plugin>
+                <param name="example_param_hw_start_duration_sec">3.0</param>
+                <param name="example_param_hw_stop_duration_sec">6.0</param>
+                <param name="example_param_hw_slowdown">6.0</param>
+                <param name="arm_class">5.0</param>
+                <param name="sim">${sim}</param>
+            </hardware>
+            
+            <!-- 定义一个关节接口的宏 -->
+            <xacro:macro name="joint_full_interface" params="joint_name">
+                <joint name="${joint_name}">
+                    <!-- 命令接口 -->
+                    <command_interface name="position"/>
+                    <command_interface name="velocity"/>
+                    <command_interface name="effort"/>
+                    <command_interface name="status"/>
+                    <command_interface name="mode"/>
+                    <command_interface name="power_enable"/>
+                    <!-- 状态接口 -->
+                    <state_interface name="position">
+                        <param name="initial_value">${initial_positions[joint_name]}</param>
+                    </state_interface>
+                    <state_interface name="velocity"/>
+                    <state_interface name="effort"/>
+                    <state_interface name="motor_encoder_0"/>
+                    <state_interface name="motor_encoder_1"/>
+                    <state_interface name="status"/>
+                    <state_interface name="error_code"/>
+                    <state_interface name="mode"/>
+                    <state_interface name="power_enable"/>
+                </joint>
+            </xacro:macro>
+            
+            <!-- 应用宏到所有关节 -->
+            <xacro:joint_full_interface joint_name="ljoint1"/>
+            <xacro:joint_full_interface joint_name="ljoint2"/>
+            <xacro:joint_full_interface joint_name="ljoint3"/>
+            <xacro:joint_full_interface joint_name="ljoint4"/>
+            <xacro:joint_full_interface joint_name="ljoint5"/>
+            <xacro:joint_full_interface joint_name="ljoint6"/>
+            <xacro:joint_full_interface joint_name="ljoint7"/>
+            <xacro:joint_full_interface joint_name="rjoint1"/>
+            <xacro:joint_full_interface joint_name="rjoint2"/>
+            <xacro:joint_full_interface joint_name="rjoint3"/>
+            <xacro:joint_full_interface joint_name="rjoint4"/>
+            <xacro:joint_full_interface joint_name="rjoint5"/>
+            <xacro:joint_full_interface joint_name="rjoint6"/>
+            <xacro:joint_full_interface joint_name="rjoint7"/>
+
+        </ros2_control>
+    </xacro:macro>
+</robot>

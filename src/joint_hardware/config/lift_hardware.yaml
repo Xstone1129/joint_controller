@@ -1,0 +1,95 @@
+# EtherCAT/CiA 402 CSV lift configuration.
+# Use backend=mock for offline tests. Use backend=etherlab only after the
+# EtherLab master, slave identity, wiring and brake timing have been checked.
+ethercat_backend: mock
+ethercat_interface: enp5s0
+# Master0/1 are occupied by the two arm EtherCAT chains on this computer.
+ethercat_master_index: 2
+ethercat_cycle_ms: 10
+expected_working_counter: 1
+slave_alias: 0
+slave_position: 0
+slave_vendor_id: 0
+slave_product_code: 0
+pdo_rx_logical_address: 0
+pdo_tx_logical_address: 0
+pdo_rx_bytes: 8
+pdo_tx_bytes: 17
+# Obtain this vendor-specific word from the LD3M ESI/XML file. Keep zero until
+# it is confirmed; zero deliberately disables guessed Distributed Clock setup.
+dc_assign_activate: 0
+dc_sync0_shift_ns: 0
+
+motor_id: LVM08008H3G3-M17
+lead_mm_per_rev: 10.0
+lift_sign: -1.0
+command_units_per_rev: 10000
+encoder_counts_per_rev: 131072
+position_min_m: -1.0
+position_max_m: 0.0
+max_rpm: 360
+# When feedback is outside the software travel, only an explicit command back
+# into the valid range is accepted, at no more than this recovery speed.
+position_limit_recovery_max_rpm: 300
+
+feedback_timeout_ms: 100
+lift_velocity_kp_rpm_per_m: 3000.0
+lift_velocity_kd_rpm_per_mps: 300.0
+lift_velocity_deadband_m: 0.001
+lift_velocity_slowdown_distance_m: 0.006
+lift_velocity_stop_window_m: 0.002
+lift_velocity_stop_target_stable_ms: 50
+lift_velocity_stop_window_max_rpm: 10
+lift_velocity_feedback_filter_alpha: 0.20
+lift_velocity_command_epsilon_rpm: 1.0
+lift_velocity_slew_rpm_per_s: 600.0
+lift_velocity_stop_slew_rpm_per_s: 0.0
+lift_velocity_brake_accel_rpm_per_s: 1200.0
+lift_velocity_overshoot_guard_window_m: 0.006
+lift_velocity_overshoot_recovery_max_rpm: 10
+lift_velocity_direct_stop_in_stop_window: false
+lift_stationary_velocity_threshold_mps: 0.001
+command_epsilon_m: 0.0005
+max_feedback_jump_m: 0.2
+max_feedback_velocity_mps: 0.060
+feedback_velocity_tolerance_mps: 0.003
+lift_motion_command_period_ms: 10
+
+lift_startup_motion_guard_enabled: true
+lift_startup_motion_guard_ms: 3000
+
+reset_velocity_rpm: 96
+reset_velocity_period_ms: 50
+reset_velocity_timeout_ms: 10000
+reset_velocity_debug_enabled: false
+# LD3M HM defaults to method 19 (HOME-SWITCH state change). Select a method
+# matching the actual HOME/POT/NOT/Z wiring before enabling this service.
+homing_method: 19
+homing_speed_high_units_s: 10000
+homing_speed_low_units_s: 5000
+homing_acceleration_units_s2: 500000
+homing_offset_units: 0
+homing_timeout_ms: 60000
+drive_zero_timeout_ms: 5000
+max_fault_reset_attempts: 3
+fault_reset_backoff_ms: 100
+# 6061h may be transient during CiA 402 enable/disable. Latch a persistent
+# mismatch after this many 10 ms cycles while an explicit enable is requested.
+mode_mismatch_debounce_cycles: 5
+auto_fault_reset: true
+
+brake_control_enabled: false
+limit_switch_enabled: false
+limit_switch_positive_bit: -1
+limit_switch_negative_bit: -1
+limit_switch_active_high: true
+# Confirm the actual P04.38 value on the drive before enabling motion. This
+# setting must remain -1 until the measured P04.38 value is confirmed on the drive.
+brake_release_wait_ms: -1
+brake_p04_37_ms: 150
+brake_p04_39_rpm: 30
+brake_p06_14_ms: 500
+brake_p05_06_mode: drive_default
+brake_p05_10_mode: drive_default
+
+zero_offset_file: /tmp/joint_hardware_lift_zero_offset.cfg

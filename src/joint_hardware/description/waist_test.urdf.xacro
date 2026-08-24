@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<robot name="waist_test" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:arg name="waist_port" default="/dev/serial/by-id/usb-STMicroelectronics_STM32_Virtual_ComPort_307A335D3435-if00"/>
+  <xacro:arg name="waist_node_id" default="1"/>
+  <xacro:arg name="waist_channel" default="2"/>
+  <xacro:include filename="$(find joint_hardware)/description/waist.ros2_control.xacro"/>
+
+  <link name="base_link"/>
+  <link name="waist_link"/>
+  <joint name="joint_qugan" type="revolute">
+    <parent link="base_link"/>
+    <child link="waist_link"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0.0" upper="1.57" effort="100.0" velocity="0.5"/>
+  </joint>
+
+  <xacro:joint_waist_ros2_control
+    name="WaistSystem"
+    waist_port="$(arg waist_port)"
+    waist_node_id="$(arg waist_node_id)"
+    waist_channel="$(arg waist_channel)"/>
+</robot>

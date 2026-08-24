@@ -1,0 +1,29 @@
+[Unit]
+Description=Joint controller robot stack
+After=network-online.target NetworkManager.service
+Wants=network-online.target
+Conflicts=joint-controller-stack-sim.service joint-controller-stack-real.service robot.service
+
+[Service]
+Type=simple
+Environment=SUDO_USER=user
+Environment=ROS_DOMAIN_ID=2
+Environment=ROS_LOCALHOST_ONLY=0
+Environment=RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+Environment=CYCLONEDDS_URI=file:///home/user/joint_controller/cyclonedds.xml
+Environment=ROS_DISCOVERY_SERVER=
+Environment=FASTRTPS_DEFAULT_PROFILES_FILE=
+Environment=FASTDDS_BUILTIN_TRANSPORTS=
+Environment=FASTDDS_DEFAULT_PROFILES_FILE=
+Environment=SIM=1.0
+Environment=USE_RVIZ=true
+Environment=ENABLE_EFFORT_MODE_SWITCH=false
+ExecStart=/home/user/joint_controller/start.sh
+SuccessExitStatus=130 143
+TimeoutStartSec=60
+TimeoutStopSec=45
+KillSignal=SIGTERM
+KillMode=mixed
+
+[Install]
+WantedBy=multi-user.target

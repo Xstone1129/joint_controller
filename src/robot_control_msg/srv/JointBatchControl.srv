@@ -1,0 +1,16 @@
+# A single joint command may update one through all fourteen arm joints.
+uint8 MANUAL=0
+uint8 TRAJECTORY=1
+
+string[] joint_names
+float64[] values
+bool relative
+float64 vel
+float64 acc
+uint8 source_mode
+uint32 command_seq
+---
+bool accepted
+uint32 command_seq
+float64[14] target_joints
+string message
