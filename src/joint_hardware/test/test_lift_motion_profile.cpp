@@ -8,6 +8,9 @@
 namespace
 {
 
+constexpr double kMaxVelocityMps = 0.020;
+constexpr double kMaxAccelerationMps2 = 0.033333333;
+
 joint_hardware::lift::LiftMotionProfile configured_profile()
 {
   joint_hardware::lift::LiftMotionProfile profile(0.01);
@@ -22,7 +25,7 @@ TEST(LiftMotionProfile, RejectsLimitsAboveMechanicalVelocity)
 {
   joint_hardware::lift::LiftMotionProfile profile;
   joint_hardware::lift::LiftMotionLimits limits;
-  limits.max_velocity_mps = 0.061;
+  limits.max_velocity_mps = 0.021;
   std::string error;
   EXPECT_FALSE(profile.configure(limits, error));
 }
@@ -35,8 +38,8 @@ TEST(LiftMotionProfile, PositionProfileRespectsVelocityAccelerationAndJerk)
   for (int cycle = 0; cycle < 500; ++cycle) {
     const auto sample = profile.update(0.01);
     ASSERT_TRUE(sample.valid);
-    EXPECT_LE(std::abs(sample.velocity_mps), 0.060 * 0.80 + 1.0e-8);
-    EXPECT_LE(std::abs(sample.acceleration_mps2), 0.10 + 1.0e-8);
+    EXPECT_LE(std::abs(sample.velocity_mps), kMaxVelocityMps * 0.80 + 1.0e-8);
+    EXPECT_LE(std::abs(sample.acceleration_mps2), kMaxAccelerationMps2 + 1.0e-8);
     EXPECT_LE(std::abs(sample.jerk_mps3), 0.4 + 1.0e-6);
     if (cycle > 0) {
       EXPECT_LE(std::abs(sample.acceleration_mps2 - previous_acceleration), 0.004 + 1.0e-6);
@@ -53,15 +56,15 @@ TEST(LiftMotionProfile, DefaultVelocityScaleIsEightyPercent)
   for (int cycle = 0; cycle < 1000; ++cycle) {
     peak_velocity = std::max(peak_velocity, std::abs(profile.update(0.01).velocity_mps));
   }
-  EXPECT_LE(peak_velocity, 0.048 + 1.0e-8);
-  EXPECT_GT(peak_velocity, 0.040);
+  EXPECT_LE(peak_velocity, kMaxVelocityMps * 0.80 + 1.0e-8);
+  EXPECT_GT(peak_velocity, 0.013);
 }
 
 TEST(LiftMotionProfile, JogCannotDriveBeyondLowerSoftwareLimit)
 {
   auto profile = configured_profile();
   profile.reset(-0.999);
-  ASSERT_TRUE(profile.set_velocity_target(-0.060, 1.0));
+  ASSERT_TRUE(profile.set_velocity_target(-kMaxVelocityMps, 1.0));
   for (int cycle = 0; cycle < 500; ++cycle) {
     const auto sample = profile.update(0.01);
     EXPECT_GE(sample.position_m, -1.0);
@@ -74,7 +77,7 @@ TEST(LiftMotionProfile, JogCannotDriveBeyondUpperSoftwareLimit)
 {
   auto profile = configured_profile();
   profile.reset(-0.001);
-  ASSERT_TRUE(profile.set_velocity_target(0.060, 1.0));
+  ASSERT_TRUE(profile.set_velocity_target(kMaxVelocityMps, 1.0));
   for (int cycle = 0; cycle < 500; ++cycle) {
     const auto sample = profile.update(0.01);
     EXPECT_LE(sample.position_m, 0.0);
@@ -87,7 +90,7 @@ TEST(LiftMotionProfile, SoftStopUsesAccelerationAndJerkLimits)
 {
   auto profile = configured_profile();
   profile.reset(-0.5);
-  ASSERT_TRUE(profile.set_velocity_target(0.040, 1.0));
+  ASSERT_TRUE(profile.set_velocity_target(0.016, 1.0));
   for (int cycle = 0; cycle < 200; ++cycle) {
     (void)profile.update(0.01);
   }
@@ -96,7 +99,7 @@ TEST(LiftMotionProfile, SoftStopUsesAccelerationAndJerkLimits)
   profile.request_soft_stop();
   const auto first = profile.update(0.01);
   EXPECT_GT(first.velocity_mps, 0.0);
-  EXPECT_LE(std::abs(first.acceleration_mps2), 0.10 + 1.0e-8);
+  EXPECT_LE(std::abs(first.acceleration_mps2), kMaxAccelerationMps2 + 1.0e-8);
   EXPECT_LE(std::abs(first.jerk_mps3), 0.4 + 1.0e-6);
   for (int cycle = 0; cycle < 500; ++cycle) {
     (void)profile.update(0.01);
@@ -104,12 +107,12 @@ TEST(LiftMotionProfile, SoftStopUsesAccelerationAndJerkLimits)
   EXPECT_NEAR(profile.state().velocity_mps, 0.0, 1.0e-6);
 }
 
-TEST(LiftMotionProfile, SixHundredRpmPerSecondEqualsPointOneMetresPerSecondSquared)
+TEST(LiftMotionProfile, SixHundredRpmPerSecondMatchesGearedLiftAcceleration)
 {
-  constexpr double lead_mm_per_rev = 10.0;
+  constexpr double lead_mm_per_rev = 10.0 / 3.0;
   constexpr double slew_rpm_per_sec = 600.0;
   const double acceleration_mps2 = slew_rpm_per_sec * lead_mm_per_rev / 60000.0;
-  EXPECT_DOUBLE_EQ(acceleration_mps2, 0.10);
+  EXPECT_NEAR(acceleration_mps2, 0.033333333333, 1.0e-12);
 }
 
 TEST(LiftMotionProfile, PositionTargetIsClampedBeforeRuckig)
@@ -137,7 +140,7 @@ TEST(LiftMotionProfile, PerCommandAccelerationCanOnlyTightenGlobalLimit)
   for (int cycle = 0; cycle < 300; ++cycle) {
     const auto sample = profile.update(0.01);
     ASSERT_TRUE(sample.valid);
-    EXPECT_LE(std::abs(sample.acceleration_mps2), 0.10 + 1.0e-9);
+    EXPECT_LE(std::abs(sample.acceleration_mps2), kMaxAccelerationMps2 + 1.0e-9);
   }
 }
 

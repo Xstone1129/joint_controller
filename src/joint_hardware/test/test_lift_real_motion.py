@@ -47,7 +47,7 @@ def main():
             print("aborted")
             return 2
 
-    velocity = args.speed_rpm * 10.0 / 60000.0
+    velocity = args.speed_rpm * (10.0 / 3.0) / 60000.0
     if args.direction == "down":
         velocity = -velocity
     publisher = None

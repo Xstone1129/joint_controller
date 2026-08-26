@@ -32,20 +32,20 @@ because stopping the service would tear down the other configured EtherCAT
 masters used by the robot arms.
 
 The CLI uses immediate single-key commands: `e` (enable/hold), `d` (disable),
-`z` (set the current encoder position as zero), `u` (+10 mm), `j` (-10 mm),
-space (stop), and `q` (quit). The configured travel range is `[-1 m, 0 m]`,
-so after `z` at zero, use `j` to move into the valid range.
+`z` (set the current encoder position as zero), `u`/`j` (hold-to-jog up/down,
+release-to-stop), arrow up/down (run a 100 mm position task), space (stop), and
+`q` (quit). The configured travel range is `[-1 m, 0 m]`, so after `z` at zero,
+use down/`j` to move into the valid range.
 
-Its default profile is `0.050 m/s` maximum velocity (5 cm/s) and
-`0.250 m/s^2` acceleration, reaching maximum velocity in 0.2 seconds. These
-values apply only to this standalone test tool; the normal ROS lift controller
-configuration is unchanged. Override them for a test with `--speed MPS` and
-`--accel MPS2`.
+Its default profile is `0.015 m/s` maximum velocity and `0.033333333 m/s^2`
+acceleration. These values use the same effective carriage travel as the ROS
+lift path: 10 mm screw lead through a 3:1 reduction, or 3.333333333 mm per
+motor revolution. Override them for a test with `--speed MPS` and `--accel MPS2`.
 
 The current configured coordinate range is `[-1.0, 0.0] m`. After pressing
 `z`, the current point becomes `0 m`, which is the configured positive limit.
-Use `j` to move the target by `-10 mm` into the valid range; `u` is correctly
-clamped at that upper limit. `e` only enables and holds the current position.
+Use down/`j` to move into the valid range; up/`u` is correctly clamped at that
+upper limit. `e` only enables and holds the current position.
 
 The tool always starts disabled. It sends zero CSV velocity and CiA402 shutdown
 on `stop`, exit, Ctrl-C, or an EtherCAT PDO failure.

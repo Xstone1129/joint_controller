@@ -39,7 +39,11 @@ def generate_launch_description():
         ("dc_sync0_shift_ns", "0", "SYNC0 shift in nanoseconds"),
         ("command_units_per_rev", "10000", "validated 6092/P00.08 command units per rev"),
         ("encoder_counts_per_rev", "131072", "validated 608F encoder counts per rev"),
-        ("lead_mm_per_rev", "10.0", "screw lead in millimetres per revolution"),
+        (
+            "lead_mm_per_rev",
+            "3.333333333",
+            "effective carriage travel in millimetres per motor revolution",
+        ),
         ("lift_sign", "-1.0", "mechanical direction sign"),
         ("position_min_m", "-1.0", "software lower travel limit"),
         ("position_max_m", "0.0", "software upper travel limit"),

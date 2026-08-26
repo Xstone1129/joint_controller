@@ -6,6 +6,8 @@ cli="${root_dir}/tools/lift_ethercat_cli"
 ethercat_init=/etc/init.d/ethercat
 ethercat_config=/usr/local/etherlab/etc/ethercat.conf
 master_index=2
+lift_min_position_m=-1.0
+lift_max_position_m=1.0
 
 if [[ "$(id -u)" -ne 0 ]]; then
   echo "请使用 root 运行：sudo $0" >&2
@@ -66,4 +68,6 @@ read -r vendor_id product_code <<< "${identity}"
 
 echo "Master${master_index} 已绑定 ${master_device}；lift Slave0: vendor=${vendor_id}, product=${product_code}。"
 exec "${cli}" --master "${master_index}" --position 0 \
-  --vendor "${vendor_id}" --product "${product_code}" "$@"
+  --vendor "${vendor_id}" --product "${product_code}" \
+  --min-position "${lift_min_position_m}" \
+  --max-position "${lift_max_position_m}" "$@"

@@ -21,9 +21,9 @@ bool LiftMotionProfile::configure(const LiftMotionLimits & limits, std::string &
     return false;
   }
   if (!std::isfinite(limits.max_velocity_mps) || limits.max_velocity_mps <= 0.0 ||
-    limits.max_velocity_mps > 0.060)
+    limits.max_velocity_mps > 0.020)
   {
-    error = "max velocity must be in (0, 0.060] m/s";
+    error = "max velocity must be in (0, 0.020] m/s";
     return false;
   }
   if (!std::isfinite(limits.max_acceleration_mps2) || limits.max_acceleration_mps2 <= 0.0 ||

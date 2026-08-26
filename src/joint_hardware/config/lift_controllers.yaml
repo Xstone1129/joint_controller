@@ -6,13 +6,19 @@
     lift_controller:
       type: joint_hardware/LiftController
 
+/**/joint_state_broadcaster:
+  ros__parameters:
+    use_local_topics: false
+
 /**/lift_controller:
   ros__parameters:
     joint: joint_motor
     position_min_m: -1.0
     position_max_m: 0.0
-    max_velocity_mps: 0.060
-    max_acceleration_mps2: 0.10
+    # 360 motor rpm with the 10 mm lead and 3:1 reduction is 0.020 m/s.
+    # Keep the trajectory profile inside that mechanical limit.
+    max_velocity_mps: 0.020
+    max_acceleration_mps2: 0.033333333
     max_jerk_mps3: 0.4
     default_velocity_scale: 0.80
     jog_timeout_sec: 0.45

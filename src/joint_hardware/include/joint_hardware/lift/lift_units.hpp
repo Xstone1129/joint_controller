@@ -9,7 +9,7 @@ namespace joint_hardware::lift
 
 struct LiftUnitConfig
 {
-  double lead_mm_per_rev{10.0};
+  double lead_mm_per_rev{10.0 / 3.0};
   double lift_sign{-1.0};
   uint32_t command_units_per_rev{10000};
   // The drive may expose a rational effective unit/rev value when 6091 is

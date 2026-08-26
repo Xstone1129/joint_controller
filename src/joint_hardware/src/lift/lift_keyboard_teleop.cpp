@@ -88,12 +88,17 @@ public:
   {
     joint_name_ = declare_parameter<std::string>("joint_name", "joint_motor");
     speed_rpm_ = declare_parameter<double>("speed_rpm", 30.0);
-    lead_mm_per_rev_ = declare_parameter<double>("lead_mm_per_rev", 10.0);
+    lead_mm_per_rev_ = declare_parameter<double>("lead_mm_per_rev", 10.0 / 3.0);
     position_min_m_ = declare_parameter<double>("position_min_m", -1.0);
     position_max_m_ = declare_parameter<double>("position_max_m", 0.0);
     rate_hz_ = declare_parameter<double>("command_rate_hz", 50.0);
-    release_timeout_ms_ = declare_parameter<int>("release_timeout_ms", 150);
+    // A terminal commonly waits several hundred milliseconds before it starts
+    // repeating a held arrow key.  A shorter timeout turns a valid jog request
+    // into a STOP before the brake gate can complete.
+    release_timeout_ms_ = declare_parameter<int>("release_timeout_ms", 1000);
     arm_timeout_ms_ = declare_parameter<int>("arm_timeout_ms", 1000);
+    joint_state_topic_ = declare_parameter<std::string>(
+      "joint_state_topic", "/lift/joint_states");
 
     if (!std::isfinite(speed_rpm_) || speed_rpm_ <= 0.0 || speed_rpm_ > 360.0) {
       throw std::invalid_argument("speed_rpm must be in (0, 360]");
@@ -109,15 +114,16 @@ public:
     if (!std::isfinite(rate_hz_) || rate_hz_ < 10.0 || rate_hz_ > 200.0) {
       throw std::invalid_argument("command_rate_hz must be in [10, 200]");
     }
-    if (release_timeout_ms_ < 50 || arm_timeout_ms_ < release_timeout_ms_) {
-      throw std::invalid_argument("invalid key timeout parameters");
+    if (release_timeout_ms_ < 600 || arm_timeout_ms_ < release_timeout_ms_) {
+      throw std::invalid_argument(
+              "release_timeout_ms must be at least 600 and arm_timeout_ms must be no smaller");
     }
 
     speed_mps_ = speed_rpm_ * lead_mm_per_rev_ / 60000.0;
     jog_publisher_ = create_publisher<std_msgs::msg::Float64>(
       "/joint/lift/jog_velocity", rclcpp::QoS(1).best_effort());
     joint_state_subscription_ = create_subscription<sensor_msgs::msg::JointState>(
-      "/joint_states", rclcpp::SensorDataQoS(),
+      joint_state_topic_, rclcpp::SensorDataQoS(),
       [this](sensor_msgs::msg::JointState::ConstSharedPtr message) {
         for (std::size_t index = 0; index < message->name.size(); ++index) {
           if (message->name[index] == joint_name_ && index < message->position.size() &&
@@ -141,6 +147,7 @@ public:
       get_logger(),
       "Jog speed %.1f rpm (%.4f m/s), travel [%.3f, %.3f] m",
       speed_rpm_, speed_mps_, position_min_m_, position_max_m_);
+    RCLCPP_INFO(get_logger(), "Joint feedback topic: %s", joint_state_topic_.c_str());
   }
 
   void process_input()
@@ -362,13 +369,14 @@ private:
 
   std::string joint_name_;
   double speed_rpm_{30.0};
-  double lead_mm_per_rev_{10.0};
+  double lead_mm_per_rev_{10.0 / 3.0};
   double speed_mps_{0.005};
   double position_min_m_{-1.0};
   double position_max_m_{0.0};
   double rate_hz_{50.0};
   int release_timeout_ms_{150};
   int arm_timeout_ms_{1000};
+  std::string joint_state_topic_{"/lift/joint_states"};
 
   rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr jog_publisher_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_state_subscription_;

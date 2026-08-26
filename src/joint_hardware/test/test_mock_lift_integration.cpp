@@ -30,7 +30,7 @@ hardware_interface::HardwareInfo make_lift_hardware_info(
     {"slave_alias", "0"},
     {"slave_position", "0"},
     {"motor_id", "LVM08008H3G3-M17"},
-    {"lead_mm_per_rev", "10.0"},
+    {"lead_mm_per_rev", "3.333333333"},
     {"lift_sign", "-1.0"},
     {"command_units_per_rev", "10000"},
     {"brake_control_enabled", "true"},
@@ -462,9 +462,9 @@ TEST(MockLiftHardware, CoordinateJumpStaysLatchedUntilExplicitSafeReset)
   ASSERT_EQ(hardware.read(time, period), hardware_interface::return_type::OK);
   ASSERT_EQ(hardware.write(time, period), hardware_interface::return_type::OK);
 
-  // 100000 units is -0.1 m with the test conversion, exceeding the 0.05 m
-  // threshold in one fresh sample of the same epoch.
-  backend_view->set_actual_position_units(100'000);
+  // 200000 units is -0.06666666666 m with the geared conversion, exceeding the
+  // 0.05 m threshold in one fresh sample of the same epoch.
+  backend_view->set_actual_position_units(200'000);
   ASSERT_EQ(hardware.read(time, period), hardware_interface::return_type::OK);
   EXPECT_FALSE(call_bool(true)->success);
 
@@ -480,7 +480,7 @@ TEST(MockLiftHardware, CoordinateJumpStaysLatchedUntilExplicitSafeReset)
   // the old motion command.
   for (auto & command : hardware.export_command_interfaces()) {
     if (command.get_interface_name() == "position") {
-      command.set_value(-0.1);
+      command.set_value(-0.06666666666);
     } else if (command.get_interface_name() == "velocity" ||
       command.get_interface_name() == "acceleration")
     {
@@ -520,7 +520,7 @@ TEST(MockLiftHardware, RunsRos2ControlReadWriteAt100Hz)
     {"slave_alias", "0"},
     {"slave_position", "0"},
     {"motor_id", "LVM08008H3G3-M17"},
-    {"lead_mm_per_rev", "10.0"},
+    {"lead_mm_per_rev", "3.333333333"},
     {"lift_sign", "-1.0"},
     {"command_units_per_rev", "10000"},
     {"brake_control_enabled", "true"},
@@ -1013,7 +1013,7 @@ TEST(MockLiftHardware, QuickStopDeadlineForcesDisable)
     {"slave_alias", "0"},
     {"slave_position", "0"},
     {"motor_id", "LVM08008H3G3-M17"},
-    {"lead_mm_per_rev", "10.0"},
+    {"lead_mm_per_rev", "3.333333333"},
     {"lift_sign", "-1.0"},
     {"command_units_per_rev", "10000"},
     {"brake_control_enabled", "true"},
@@ -1109,7 +1109,7 @@ TEST(MockLiftHardware, BrakeControlDisabledNeverRequestsOperationEnabled)
     {"slave_alias", "0"},
     {"slave_position", "0"},
     {"motor_id", "LVM08008H3G3-M17"},
-    {"lead_mm_per_rev", "10.0"},
+    {"lead_mm_per_rev", "3.333333333"},
     {"lift_sign", "-1.0"},
     {"command_units_per_rev", "10000"},
     {"brake_control_enabled", "false"},
@@ -1206,7 +1206,7 @@ TEST(MockLiftHardware, ConfiguredNegativeLimitStopsOnlyNegativeMotion)
     {"slave_alias", "0"},
     {"slave_position", "0"},
     {"motor_id", "LVM08008H3G3-M17"},
-    {"lead_mm_per_rev", "10.0"},
+    {"lead_mm_per_rev", "3.333333333"},
     {"lift_sign", "-1.0"},
     {"command_units_per_rev", "10000"},
     {"brake_control_enabled", "true"},
@@ -1279,8 +1279,9 @@ TEST(MockLiftHardware, PositionLimitViolationAllowsOnlyBoundedInwardRecovery)
 
   auto backend = std::make_unique<joint_hardware::lift::MockLiftEthercatBackend>();
   auto * backend_view = backend.get();
-  // With lift_sign=-1 and 10000 units/rev, 1,010,000 units is -1.01 m.
-  backend_view->set_actual_position_units(1'010'000);
+  // With lift_sign=-1, 10000 units/rev and 3.333333333 mm/rev,
+  // 3,030,000 units is -1.01 m.
+  backend_view->set_actual_position_units(3'030'000);
   joint_hardware::LiftHardware hardware(std::move(backend));
   auto info = make_lift_hardware_info({
       {"zero_offset_file", "/tmp/joint_hardware_mock_limit_recovery_zero.cfg"},
@@ -1363,7 +1364,7 @@ TEST(MockLiftHardware, PositionLimitViolationAllowsOnlyBoundedInwardRecovery)
 
   // Simulate re-entry to the valid range. A debug takeover is no longer
   // rejected for the position violation, proving the recovery latch cleared.
-  backend_view->set_actual_position_units(990'000);
+  backend_view->set_actual_position_units(2'970'000);
   ASSERT_EQ(hardware.read(time, period), hardware_interface::return_type::OK);
   ASSERT_EQ(hardware.write(time, period), hardware_interface::return_type::OK);
   const auto reset_after_recovery = call_bool("/lift_reset_velocity", true);
@@ -1375,6 +1376,76 @@ TEST(MockLiftHardware, PositionLimitViolationAllowsOnlyBoundedInwardRecovery)
     hardware.on_deactivate(rclcpp_lifecycle::State{}),
     hardware_interface::CallbackReturn::SUCCESS);
   std::filesystem::remove("/tmp/joint_hardware_mock_limit_recovery_zero.cfg");
+  client_executor.remove_node(client_node);
+  rclcpp::shutdown();
+}
+
+TEST(MockLiftHardware, ResetMayCrossUpperLimitOnlyWithinBoundedSearchWindow)
+{
+  int argc = 0;
+  char ** argv = nullptr;
+  rclcpp::init(argc, argv);
+
+  auto backend = std::make_unique<joint_hardware::lift::MockLiftEthercatBackend>();
+  auto * backend_view = backend.get();
+  joint_hardware::LiftHardware hardware(std::move(backend));
+  auto info = make_lift_hardware_info({
+      {"zero_offset_file", "/tmp/joint_hardware_mock_reset_search_zero.cfg"},
+      {"lift_startup_motion_guard_enabled", "false"},
+      {"reset_velocity_debug_enabled", "true"},
+      {"reset_max_search_travel_m", "0.05"},
+      {"reset_velocity_timeout_ms", "1000"},
+    });
+  ASSERT_EQ(hardware.on_init(info), hardware_interface::CallbackReturn::SUCCESS);
+  ASSERT_EQ(
+    hardware.on_configure(rclcpp_lifecycle::State{}),
+    hardware_interface::CallbackReturn::SUCCESS);
+  ASSERT_EQ(
+    hardware.on_activate(rclcpp_lifecycle::State{}),
+    hardware_interface::CallbackReturn::SUCCESS);
+
+  auto client_node = std::make_shared<rclcpp::Node>("joint_lift_reset_search_bound_test");
+  rclcpp::executors::SingleThreadedExecutor client_executor;
+  client_executor.add_node(client_node);
+  const auto call_reset_velocity = [&](bool enabled) {
+      auto client = client_node->create_client<std_srvs::srv::SetBool>("/lift_reset_velocity");
+      EXPECT_TRUE(client->wait_for_service(std::chrono::seconds(2)));
+      auto request = std::make_shared<std_srvs::srv::SetBool::Request>();
+      request->data = enabled;
+      auto future = client->async_send_request(request);
+      EXPECT_EQ(
+        client_executor.spin_until_future_complete(future, std::chrono::seconds(2)),
+        rclcpp::FutureReturnCode::SUCCESS);
+      return future.get();
+    };
+
+  const rclcpp::Time time(0, 0, RCL_ROS_TIME);
+  const rclcpp::Duration period = rclcpp::Duration::from_nanoseconds(10'000'000);
+  ASSERT_EQ(hardware.read(time, period), hardware_interface::return_type::OK);
+  ASSERT_TRUE(call_reset_velocity(true)->success);
+
+  // lift_sign=-1 and 3.333333333 mm/rev: -60,000 units is about +0.02 m.
+  backend_view->set_actual_position_units(-60'000);
+  ASSERT_EQ(hardware.read(time, period), hardware_interface::return_type::OK);
+  const auto heartbeat_inside_bound = call_reset_velocity(true);
+  ASSERT_NE(heartbeat_inside_bound, nullptr);
+  EXPECT_TRUE(heartbeat_inside_bound->success) << heartbeat_inside_bound->message;
+  EXPECT_NE(heartbeat_inside_bound->message.find("watchdog refreshed"), std::string::npos);
+
+  // Crossing the 0.05 m reset-search bound revokes the special upper-limit
+  // allowance. A later heartbeat is rejected as outside software limits.
+  backend_view->set_actual_position_units(-180'000);
+  ASSERT_EQ(hardware.read(time, period), hardware_interface::return_type::OK);
+  const auto heartbeat_outside_bound = call_reset_velocity(true);
+  ASSERT_NE(heartbeat_outside_bound, nullptr);
+  EXPECT_FALSE(heartbeat_outside_bound->success);
+  EXPECT_NE(
+    heartbeat_outside_bound->message.find("outside software limits"), std::string::npos);
+
+  ASSERT_EQ(
+    hardware.on_deactivate(rclcpp_lifecycle::State{}),
+    hardware_interface::CallbackReturn::SUCCESS);
+  std::filesystem::remove("/tmp/joint_hardware_mock_reset_search_zero.cfg");
   client_executor.remove_node(client_node);
   rclcpp::shutdown();
 }

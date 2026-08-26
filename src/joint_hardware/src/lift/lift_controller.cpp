@@ -46,8 +46,8 @@ controller_interface::CallbackReturn LiftController::on_init()
     auto_declare<std::string>("joint", "joint_motor");
     auto_declare<double>("position_min_m", -1.0);
     auto_declare<double>("position_max_m", 0.0);
-    auto_declare<double>("max_velocity_mps", 0.060);
-    auto_declare<double>("max_acceleration_mps2", 0.10);
+    auto_declare<double>("max_velocity_mps", 0.020);
+    auto_declare<double>("max_acceleration_mps2", 0.033333333);
     auto_declare<double>("max_jerk_mps3", 0.4);
     auto_declare<double>("default_velocity_scale", 0.80);
     auto_declare<double>("jog_timeout_sec", 0.45);
@@ -583,6 +583,7 @@ controller_interface::return_type LiftController::update(
   bool safety_command_consumed = false;
   MotionCommand heavy_command;
   bool heavy_command_consumed = false;
+  bool heavy_stream_sample_selected = false;
   const auto safety_generation = safety_command_generation_.load(std::memory_order_acquire);
   if (safety_generation != consumed_safety_command_generation_) {
     const MotionCommand * pending_safety = safety_command_buffer_.readFromRT();
@@ -671,6 +672,7 @@ controller_interface::return_type LiftController::update(
       command_sample_ = {
         command.position_m, command.velocity_mps, command.acceleration_mps2,
         0.0, false, true};
+      heavy_stream_sample_selected = true;
       status_message_ = "Heavy external streaming setpoint active";
     } else if (command.type != CommandType::none) {
       active_trajectory_.reset();
@@ -706,6 +708,7 @@ controller_interface::return_type LiftController::update(
         std::chrono::duration<double>(brake_gate_stable_sec_))
       {
         start_gated_motion();
+        heavy_stream_sample_selected = mode_ == Mode::streaming;
       }
     } else {
       gate_stable_since_ = std::chrono::steady_clock::time_point{};
@@ -740,6 +743,10 @@ controller_interface::return_type LiftController::update(
     mode_ == Mode::soft_stop)
   {
     command_sample_ = profile_.update(dt);
+  } else if (mode_ == Mode::streaming) {
+    // command_sample_ is the latest upstream time-parameterized Heavy sample.
+    // Do not replace it with profile_.state(), which still contains the HOLD
+    // state captured before streaming began.
   } else {
     command_sample_ = profile_.state();
   }
@@ -800,7 +807,7 @@ controller_interface::return_type LiftController::update(
     }
   }
   if (pending_heavy_follow_ack_sequence_ != 0 && mode_ == Mode::streaming &&
-    driver_gate_ready() && heavy_ack_publisher_)
+    driver_gate_ready() && heavy_stream_sample_selected && heavy_ack_publisher_)
   {
     std_msgs::msg::UInt64 ack;
     ack.data = pending_heavy_follow_ack_sequence_;

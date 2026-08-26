@@ -6,7 +6,7 @@
             slave_alias:=0 slave_position:=0 slave_vendor_id:=0 slave_product_code:=0
             ethercat_interface:=enp5s0 dc_assign_activate:=0 dc_sync0_shift_ns:=0
             command_units_per_rev:=10000 encoder_counts_per_rev:=131072
-            lead_mm_per_rev:=10.0 lift_sign:=-1.0 position_min_m:=-1.0
+            lead_mm_per_rev:=3.333333333 lift_sign:=-1.0 position_min_m:=-1.0
             position_max_m:=0.0 max_rpm:=360 brake_control_enabled:=false
             position_limit_recovery_max_rpm:=300
             limit_switch_enabled:=false limit_switch_positive_bit:=-1
@@ -43,6 +43,7 @@
         <param name="encoder_counts_per_rev">${encoder_counts_per_rev}</param>
         <param name="position_min_m">${position_min_m}</param>
         <param name="position_max_m">${position_max_m}</param>
+        <param name="reset_max_search_travel_m">${lift_cfg['reset_max_search_travel_m']}</param>
         <param name="max_rpm">${max_rpm}</param>
         <param name="position_limit_recovery_max_rpm">${position_limit_recovery_max_rpm}</param>
         <param name="brake_control_enabled">${brake_control_enabled}</param>

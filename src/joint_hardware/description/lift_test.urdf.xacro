@@ -14,7 +14,7 @@
   <xacro:arg name="dc_sync0_shift_ns" default="0"/>
   <xacro:arg name="command_units_per_rev" default="10000"/>
   <xacro:arg name="encoder_counts_per_rev" default="131072"/>
-  <xacro:arg name="lead_mm_per_rev" default="10.0"/>
+  <xacro:arg name="lead_mm_per_rev" default="3.333333333"/>
   <xacro:arg name="lift_sign" default="-1.0"/>
   <xacro:arg name="position_min_m" default="-1.0"/>
   <xacro:arg name="position_max_m" default="0.0"/>
@@ -80,6 +80,6 @@
     <parent link="lift_base"/>
     <child link="lift_carriage"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-1.0" upper="0.0" velocity="0.060" effort="1000.0"/>
+    <limit lower="-1.0" upper="0.0" velocity="0.020" effort="1000.0"/>
   </joint>
 </robot>
