@@ -21,6 +21,7 @@ g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -DJOINT_HARDWARE_HAS_ETHERLAB=1 \
   "${source_dir}/pdo_mapping.cpp" \
   "${source_dir}/cia402.cpp" \
   "${source_dir}/lift_units.cpp" \
+  "${source_dir}/zero_offset_store.cpp" \
   -L/usr/local/etherlab/lib -Wl,-rpath,/usr/local/etherlab/lib \
   -lethercat -pthread -o "${out_file}"
 

@@ -66,8 +66,21 @@ if [[ -z "${identity}" ]]; then
 fi
 read -r vendor_id product_code <<< "${identity}"
 
+zero_owner="${SUDO_USER:-${USER}}"
+zero_home="$(getent passwd "${zero_owner}" | awk -F: 'NR == 1 { print $6 }')"
+if [[ -z "${zero_home}" ]]; then
+  zero_home="${HOME}"
+fi
+zero_owner_uid="$(id -u "${zero_owner}")"
+zero_owner_gid="$(id -g "${zero_owner}")"
+zero_offset_file="${zero_home}/.local/state/joint_controller/lift_zero_offset.cfg"
+
 echo "Master${master_index} 已绑定 ${master_device}；lift Slave0: vendor=${vendor_id}, product=${product_code}。"
-exec "${cli}" --master "${master_index}" --position 0 \
+echo "共享 ROS 零偏文件：${zero_offset_file}"
+exec "${cli}" --master "${master_index}" --alias 0 --position 0 \
   --vendor "${vendor_id}" --product "${product_code}" \
   --min-position "${lift_min_position_m}" \
-  --max-position "${lift_max_position_m}" "$@"
+  --max-position "${lift_max_position_m}" \
+  --zero-offset-file "${zero_offset_file}" \
+  --zero-offset-uid "${zero_owner_uid}" \
+  --zero-offset-gid "${zero_owner_gid}" "$@"

@@ -3,6 +3,7 @@
 #include "joint_hardware/lift/etherlab_backend.hpp"
 #include "joint_hardware/lift/lift_units.hpp"
 #include "joint_hardware/lift/pdo_mapping.hpp"
+#include "joint_hardware/lift/zero_offset_store.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -16,6 +17,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <cstdio>
 #include <sys/select.h>
@@ -114,6 +116,13 @@ double config_double(const std::map<std::string, std::string> & config, const st
   try { return config.count(key) ? std::stod(config.at(key)) : fallback; }
   catch (...) { return fallback; }
 }
+std::string config_string(
+  const std::map<std::string, std::string> & config, const std::string & key,
+  const std::string & fallback)
+{
+  const auto it = config.find(key);
+  return it == config.end() ? fallback : it->second;
+}
 
 std::string state_name(Cia402State state) {
   switch (state) {
@@ -178,7 +187,12 @@ bool discover_identity(uint32_t master, uint16_t position, uint32_t & vendor, ui
 struct Options {
   std::string interface{"enp5s0"};
   std::string log_path{"/tmp/lift_ethercat_cli.csv"};
+  std::string zero_offset_file;
+  std::string motor_id{"LVM08008H3G3-M17"};
+  uint32_t zero_offset_uid{std::numeric_limits<uint32_t>::max()};
+  uint32_t zero_offset_gid{std::numeric_limits<uint32_t>::max()};
   uint32_t master{2};
+  uint16_t alias{0};
   uint16_t position{0};
   uint32_t vendor{0};
   uint32_t product{0};
@@ -192,6 +206,7 @@ struct Options {
   bool auto_enable{false};
   bool interface_supplied{false};
   bool master_supplied{false};
+  bool alias_supplied{false};
   bool position_supplied{false};
   bool vendor_supplied{false};
   bool product_supplied{false};
@@ -200,7 +215,7 @@ struct Options {
 };
 
 void usage(const char * name) {
-  std::cout << "Usage: " << name << " [--enable] [--interface IF] [--master N] [--position N] [--vendor ID] [--product ID] [--min-position M] [--max-position M] [--speed MPS] [--accel MPS2] [--log PATH]\n"
+  std::cout << "Usage: " << name << " [--enable] [--interface IF] [--master N] [--alias N] [--position N] [--vendor ID] [--product ID] [--min-position M] [--max-position M] [--speed MPS] [--accel MPS2] [--zero-offset-file PATH] [--zero-offset-uid UID] [--zero-offset-gid GID] [--log PATH]\n"
             << "Keys: e enable/hold, d disable, z zero, up/down arrows +/-100 mm task, hold u/j jog +/- coordinate, space stop, q quit\n";
 }
 }  // namespace
@@ -213,6 +228,7 @@ int main(int argc, char ** argv) {
     else if (arg == "--interface" && i + 1 < argc) { options.interface = argv[++i]; options.interface_supplied = true; }
     else if (arg == "--log" && i + 1 < argc) options.log_path = argv[++i];
     else if (arg == "--master" && i + 1 < argc) { options.master = std::stoul(argv[++i], nullptr, 0); options.master_supplied = true; }
+    else if (arg == "--alias" && i + 1 < argc) { options.alias = static_cast<uint16_t>(std::stoul(argv[++i], nullptr, 0)); options.alias_supplied = true; }
     else if (arg == "--position" && i + 1 < argc) { options.position = static_cast<uint16_t>(std::stoul(argv[++i], nullptr, 0)); options.position_supplied = true; }
     else if (arg == "--vendor" && i + 1 < argc) { options.vendor = std::stoul(argv[++i], nullptr, 0); options.vendor_supplied = true; }
     else if (arg == "--product" && i + 1 < argc) { options.product = std::stoul(argv[++i], nullptr, 0); options.product_supplied = true; }
@@ -220,12 +236,16 @@ int main(int argc, char ** argv) {
     else if (arg == "--max-position" && i + 1 < argc) { options.max_m = std::stod(argv[++i]); options.max_supplied = true; }
     else if (arg == "--speed" && i + 1 < argc) options.max_speed_mps = std::stod(argv[++i]);
     else if (arg == "--accel" && i + 1 < argc) options.acceleration_mps2 = std::stod(argv[++i]);
+    else if (arg == "--zero-offset-file" && i + 1 < argc) options.zero_offset_file = argv[++i];
+    else if (arg == "--zero-offset-uid" && i + 1 < argc) options.zero_offset_uid = std::stoul(argv[++i], nullptr, 0);
+    else if (arg == "--zero-offset-gid" && i + 1 < argc) options.zero_offset_gid = std::stoul(argv[++i], nullptr, 0);
     else if (arg == "--help") { usage(argv[0]); return 0; }
   }
 
   std::signal(SIGINT, stop_signal); std::signal(SIGTERM, stop_signal);
   const auto config = workspace_lift_config();
   if (!options.master_supplied) options.master = config_uint(config, "ethercat_master_index", options.master);
+  if (!options.alias_supplied) options.alias = static_cast<uint16_t>(config_uint(config, "slave_alias", options.alias));
   if (!options.position_supplied) options.position = static_cast<uint16_t>(config_uint(config, "slave_position", options.position));
   if (!options.vendor_supplied) options.vendor = config_uint(config, "slave_vendor_id", options.vendor);
   if (!options.product_supplied) options.product = config_uint(config, "slave_product_code", options.product);
@@ -234,6 +254,7 @@ int main(int argc, char ** argv) {
   options.lead_mm = config_double(config, "lead_mm_per_rev", options.lead_mm);
   options.sign = config_double(config, "lift_sign", options.sign);
   options.units = config_uint(config, "command_units_per_rev", options.units);
+  options.motor_id = config_string(config, "motor_id", options.motor_id);
   if (!std::isfinite(options.max_speed_mps) || options.max_speed_mps <= 0.0 ||
     !std::isfinite(options.acceleration_mps2) || options.acceleration_mps2 <= 0.0) {
     std::cerr << "--speed and --accel must be positive finite values.\n";
@@ -270,7 +291,7 @@ int main(int argc, char ** argv) {
             << " product=0x" << options.product << std::dec << "\n";
   auto backend = make_lift_ethercat_backend("etherlab");
   EthercatMasterConfig master{options.interface, options.master, std::chrono::milliseconds(10), 1};
-  EthercatSlaveConfig slave{}; slave.position = options.position; slave.vendor_id = options.vendor; slave.product_code = options.product;
+  EthercatSlaveConfig slave{}; slave.alias = options.alias; slave.position = options.position; slave.vendor_id = options.vendor; slave.product_code = options.product;
   std::cout << "请求 EtherLab Master" << options.master << "..." << std::endl;
   if (!backend->initialize(master)) { std::cerr << "连接 EtherCAT 主站失败: " << backend->error_message() << "\n"; return 2; }
   std::cout << "配置 lift 从站 PDO..." << std::endl;
@@ -291,8 +312,28 @@ int main(int argc, char ** argv) {
     return 2;
   }
   LiftRxPdo output{}; LiftTxPdo input{}; Cia402Controller cia(3, 10);
-  bool enable = false; double target = 0.0; int32_t zero = 0; bool have_sample = false;
+  int32_t zero = 0;
+  std::string zero_offset_status{"host zero offset disabled"};
+  if (!options.zero_offset_file.empty()) {
+    ZeroOffsetRecord record;
+    std::string zero_error;
+    const auto loaded = ZeroOffsetStore::load(
+      options.zero_offset_file, options.motor_id, options.alias, options.position, record, zero_error);
+    if (loaded == ZeroOffsetLoadResult::invalid) {
+      std::cerr << "零偏文件无效: " << zero_error << "\n";
+      (void)backend->stop();
+      return 2;
+    }
+    if (loaded == ZeroOffsetLoadResult::loaded) {
+      zero = record.zero_offset_units;
+      zero_offset_status = "loaded " + std::to_string(zero) + " units";
+    } else {
+      zero_offset_status = "no saved offset";
+    }
+  }
+  bool enable = false; double target = 0.0; bool have_sample = false;
   bool fault_latched = false;
+  bool zero_request_pending = false;
   uint16_t latched_fault_code = 0;
   uint32_t enable_wait_cycles = 0;
   double last_joint_rpm = 0.0;
@@ -333,7 +374,22 @@ int main(int argc, char ** argv) {
         target = position;
         last_action = "disabled";
         break;
-      case 'z': case 'Z': zero = input.actual_position_units; target = 0.0; last_action = "current position set to zero"; break;
+      case 'z': case 'Z':
+        if (options.zero_offset_file.empty()) {
+          last_action = "zero refused: --zero-offset-file is required";
+        } else if (!backend->pdo_fresh() ||
+          backend->link_state() != EthercatLinkState::operational ||
+          input.error_code != 0U ||
+          std::abs(velocity_units_to_mps(input.actual_velocity_units_per_s, units)) > 0.001) {
+          last_action = "zero refused: PDO must be fresh, error-free, and stationary";
+        } else {
+          jog_direction = 0;
+          enable = false;
+          target = position;
+          zero_request_pending = true;
+          last_action = "zero requested: controlled disable before saving 6064h offset";
+        }
+        break;
       case 'u': case 'U': {
         if (fault_latched) {
           last_action = "drive fault is latched; press e after inspection to retry";
@@ -437,6 +493,37 @@ int main(int argc, char ** argv) {
     if (last_action == "waiting for first PDO") { target = position; last_action = "disabled; holding current position"; }
     const double error = target - position;
     const double velocity = velocity_units_to_mps(input.actual_velocity_units_per_s, units);
+    // Match the ROS reset-zero sequence: seeing a fresh stationary cycle with
+    // the requested controlled-disable word is sufficient.  Some drives
+    // remain in Ready to Switch On (0x0021) while 0x0006 is held.
+    if (zero_request_pending && decision.control_word == 0x0006 &&
+      std::abs(velocity) <= 0.001) {
+      ZeroOffsetRecord record;
+      record.motor_id = options.motor_id;
+      record.slave_alias = options.alias;
+      record.slave_position = options.position;
+      record.zero_offset_units = input.actual_position_units;
+      std::string zero_error;
+      if (ZeroOffsetStore::save_atomic(options.zero_offset_file, record, zero_error)) {
+        if ((options.zero_offset_uid != std::numeric_limits<uint32_t>::max() ||
+          options.zero_offset_gid != std::numeric_limits<uint32_t>::max()) &&
+          chown(
+            options.zero_offset_file.c_str(), options.zero_offset_uid,
+            options.zero_offset_gid) != 0)
+        {
+          last_action = "zero saved but ownership update failed: " +
+            std::string(std::strerror(errno));
+        } else {
+          zero = record.zero_offset_units;
+          target = 0.0;
+          zero_offset_status = "saved " + std::to_string(zero) + " units";
+          last_action = "zero saved: shared host offset applied";
+        }
+      } else {
+        last_action = "zero save failed: " + zero_error;
+      }
+      zero_request_pending = false;
+    }
     const bool target_reached = std::abs(error) <= 0.001;
     const double rpm_per_mps = 60000.0 / std::abs(options.lead_mm);
     const double braking_speed_mps = std::sqrt(std::max(0.0,
@@ -540,6 +627,7 @@ int main(int argc, char ** argv) {
         << "error: 0x" << std::hex << std::setw(4) << input.error_code << std::dec << " (" << error_name(input.error_code) << ")   WKC: " << backend->working_counter() << "   PDO: " << (backend->pdo_fresh() ? "fresh" : "stale") << "\n"
         << "target: " << target << " m   command: " << (enable ? "ENABLED" : "DISABLED") << "   control: 0x" << std::hex << output.control_word << std::dec << "\n"
         << "profile: " << options.max_speed_mps << " m/s max, " << options.acceleration_mps2 << " m/s2 accel   60FF target: " << output.target_velocity_units_per_s << " units/s\n"
+        << "zero: " << zero_offset_status << "\n"
         << "gate: " << motion_gate << "\n"
         << (enable_wait_cycles >= 50U
           ? "diagnostic: 0x000f has been requested for " + std::to_string(enable_wait_cycles * 10U) +
