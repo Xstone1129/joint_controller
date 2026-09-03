@@ -12,7 +12,7 @@ struct LiftMotionLimits
 {
   double min_position_m{-1.0};
   double max_position_m{0.0};
-  double max_velocity_mps{0.020};
+  double max_velocity_mps{0.080};
   double max_acceleration_mps2{0.033333333};
   double max_jerk_mps3{0.4};
   double default_velocity_scale{0.80};

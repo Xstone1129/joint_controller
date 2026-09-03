@@ -1,7 +1,9 @@
 #include "igh_driver_internal.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
+#include <thread>
 
 namespace igh_driver_internal {
 
@@ -108,6 +110,12 @@ constexpr uint32_t kAxisErrorLogPeriodCycles = FREQUENCY / 10;
 constexpr uint32_t kAxisDiagnosticLogPeriodCycles = FREQUENCY;
 constexpr uint32_t kAxisErrorPollPeriodCycles = 4;
 constexpr uint32_t kAxisErrorRequestTimeoutMs = 50;
+constexpr unsigned int kMasterProbeTimeoutMs = 10000;
+constexpr unsigned int kMasterProbeIntervalMs = 100;
+// EtherLab can take over 30 seconds to synchronize a cold mixed-drive chain
+// after the masters have been restarted.  Keep the OP gate strict, but allow
+// the drives enough time to complete their SAFEOP -> OP transition.
+constexpr unsigned int kOperationalTimeoutMs = 60000;
 constexpr uint32_t kCspReentryTakeoverStableCycles = FREQUENCY / 50;
 constexpr uint32_t kEyouCstToCstDisableHoldCycles = FREQUENCY / 5;
 constexpr uint32_t kEyouCstToCstModeHoldCycles = FREQUENCY / 5;
@@ -997,16 +1005,38 @@ bool ProbeSingleMaster(MasterContext& ctx)
     }
 
     ec_master_info_t master_info{};
-    ecrt_master(ctx.handle, &master_info);
-    ctx.slave_count = master_info.slave_count;
-    LoadSlaveInfos(ctx);
-    return true;
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(kMasterProbeTimeoutMs);
+    while (true) {
+        if (ecrt_master(ctx.handle, &master_info) != 0) {
+            printf("Reading %s information failed\n", GetMasterName(ctx));
+            ReleaseMasterIfNeeded(ctx.handle);
+            return false;
+        }
+        ctx.slave_count = master_info.slave_count;
+        if (ctx.slave_count > 0) {
+            LoadSlaveInfos(ctx);
+            printf("%s discovered %u EtherCAT slave(s)\n",
+                   GetMasterName(ctx),
+                   ctx.slave_count);
+            return true;
+        }
+        if (std::chrono::steady_clock::now() >= deadline) {
+            printf("%s has no EtherCAT slaves after %u ms; check link, power, and interface\n",
+                   GetMasterName(ctx),
+                   kMasterProbeTimeoutMs);
+            ReleaseMasterIfNeeded(ctx.handle);
+            return false;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(kMasterProbeIntervalMs));
+    }
 }
 
 bool InspectMasterOperationalState(MasterContext& ctx, bool& operational_ok)
 {
     if (ctx.slave_count == 0) {
-        return true;
+        operational_ok = false;
+        return false;
     }
 
     ecrt_master_receive(ctx.handle);
@@ -1016,14 +1046,12 @@ bool InspectMasterOperationalState(MasterContext& ctx, bool& operational_ok)
 
     for (uint16_t i = 0; i < count; ++i) {
         if (ctx.slave_configs[i] == nullptr) {
+            operational_ok = false;
             continue;
         }
 
         ecrt_slave_config_state(ctx.slave_configs[i], &ctx.slave_states[i]);
-        if (ctx.slave_states[i].operational) {
-            printf("%s slave:%d have operational_ok OP state\n", GetMasterName(ctx), i);
-        } else {
-            printf("%s slave:%d have operational_nook OP state\n", GetMasterName(ctx), i);
+        if (!ctx.slave_states[i].operational) {
             operational_ok = false;
         }
     }
@@ -1061,6 +1089,17 @@ bool RequestAndProbeMasters(MasterContext& master0, MasterContext& master1_ctx, 
 
     master1 = master1_ctx.handle;
     totalSlaveCount = static_cast<uint16_t>(master0.slave_count + master1_ctx.slave_count);
+
+    if (master0.slave_count == 0 || master1_ctx.slave_count == 0) {
+        printf("EtherCAT master has no slaves; master0:%u master1:%u\n",
+               master0.slave_count,
+               master1_ctx.slave_count);
+        ReleaseMasterIfNeeded(master);
+        ReleaseMasterIfNeeded(master1);
+        master0.handle = nullptr;
+        master1_ctx.handle = nullptr;
+        return false;
+    }
 
     if (master0.slave_count > kMaxMasterSlaveCount || master1_ctx.slave_count > kMaxMasterSlaveCount) {
         printf("Fail master slave_count exceeds local cache, master0:%u master1:%u max_per_master:%zu\n",
@@ -1969,6 +2008,11 @@ void PrepareArmGroupAxisCommand(const CycleCache& cache)
     }
 
     if (power_on_rising_edge) {
+        for (uint8_t axis_index = 0; axis_index < kModeSwitchAxisCount; ++axis_index) {
+            if (mode_switch_axis_configured[axis_index]) {
+                SeedDesiredPositionFromFeedback(axis_index, cache.act_pos[axis_index]);
+            }
+        }
         arm_group_hold_active = false;
         eyou_cst_enable_state = EyouCstEnableState::Idle;
         eyou_cst_to_cst_state = EyouCstToCstTransitionState::Idle;
@@ -2376,7 +2420,10 @@ bool WaitUntilAllSlavesOperational(MasterContext& master0, MasterContext& master
     struct timespec cycleTime = {0, PERIOD_NS};
     clock_gettime(CLOCK_MONOTONIC, &wakeupTime);
 
-    while (1) {
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(kOperationalTimeoutMs);
+    unsigned int report_divider = 0;
+    while (true) {
         bool operational_ok = true;
 
         timespec_add(&wakeupTime, &wakeupTime, &cycleTime);
@@ -2391,6 +2438,29 @@ bool WaitUntilAllSlavesOperational(MasterContext& master0, MasterContext& master
             }
             printf("ALL slaves have reached OP state\n");
             return true;
+        }
+
+        if (++report_divider >= FREQUENCY / 2) {
+            report_divider = 0;
+            printf("Waiting for EtherCAT slaves to reach OP state\n");
+        }
+
+        if (std::chrono::steady_clock::now() >= deadline) {
+            printf("Timed out after %u ms waiting for EtherCAT slaves to reach OP state\n",
+                   kOperationalTimeoutMs);
+            for (MasterContext* ctx : {&master0, &master1_ctx}) {
+                for (uint16_t i = 0; i < ctx->slave_count; ++i) {
+                    if (ctx->slave_configs[i] != nullptr) {
+                        printf("%s slave:%u state=%u online=%u operational=%u\n",
+                               GetMasterName(*ctx),
+                               i,
+                               ctx->slave_states[i].al_state,
+                               ctx->slave_states[i].online,
+                               ctx->slave_states[i].operational);
+                    }
+                }
+            }
+            return false;
         }
 
         SyncAndSendMaster(master0);

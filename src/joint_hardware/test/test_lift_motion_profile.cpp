@@ -8,7 +8,7 @@
 namespace
 {
 
-constexpr double kMaxVelocityMps = 0.020;
+constexpr double kMaxVelocityMps = 0.080;
 constexpr double kMaxAccelerationMps2 = 0.033333333;
 
 joint_hardware::lift::LiftMotionProfile configured_profile()
@@ -25,7 +25,7 @@ TEST(LiftMotionProfile, RejectsLimitsAboveMechanicalVelocity)
 {
   joint_hardware::lift::LiftMotionProfile profile;
   joint_hardware::lift::LiftMotionLimits limits;
-  limits.max_velocity_mps = 0.021;
+  limits.max_velocity_mps = 0.081;
   std::string error;
   EXPECT_FALSE(profile.configure(limits, error));
 }

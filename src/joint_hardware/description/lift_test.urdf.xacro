@@ -18,7 +18,7 @@
   <xacro:arg name="lift_sign" default="-1.0"/>
   <xacro:arg name="position_min_m" default="-1.0"/>
   <xacro:arg name="position_max_m" default="0.0"/>
-  <xacro:arg name="max_rpm" default="360"/>
+  <xacro:arg name="max_rpm" default="1440"/>
   <xacro:arg name="position_limit_recovery_max_rpm" default="300"/>
   <xacro:arg name="brake_control_enabled" default="false"/>
   <xacro:arg name="limit_switch_enabled" default="false"/>
@@ -80,6 +80,6 @@
     <parent link="lift_base"/>
     <child link="lift_carriage"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-1.0" upper="0.0" velocity="0.020" effort="1000.0"/>
+    <limit lower="-1.0" upper="0.0" velocity="0.080" effort="1000.0"/>
   </joint>
 </robot>

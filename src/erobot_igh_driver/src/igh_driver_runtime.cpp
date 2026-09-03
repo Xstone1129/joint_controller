@@ -269,6 +269,8 @@ bool InitializeSharedMemoryRegion()
             true);
 
         std::memcpy(&ec_shm_desire_axis_data, ec_shm_desire_axis_data_ptr, sizeof(ec_shm_desire_axis_data));
+        ec_shm_desire_axis_data.ec_poweron = 0;
+        std::memcpy(ec_shm_desire_axis_data_ptr, &ec_shm_desire_axis_data, sizeof(ec_shm_desire_axis_data));
         std::memset(&ec_shm_to_axis_data, 0, sizeof(ec_shm_to_axis_data));
         std::memset(&ec_shm_real_axis_data, 0, sizeof(ec_shm_real_axis_data));
         if (shared_motor_monitor_debug_ptr != nullptr) {

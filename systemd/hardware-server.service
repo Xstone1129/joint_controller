@@ -1,0 +1,18 @@
+[Unit]
+Description=Non-ROS TCP hardware server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/user/joint_controller
+ExecStart=/home/user/joint_controller/tools/hardware/run_hardware_server.sh --real-backend
+ExecStopPost=/etc/init.d/ethercat stop
+Restart=on-failure
+RestartSec=2
+KillSignal=SIGTERM
+KillMode=mixed
+
+[Install]
+WantedBy=multi-user.target

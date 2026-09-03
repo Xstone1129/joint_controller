@@ -46,7 +46,7 @@ controller_interface::CallbackReturn LiftController::on_init()
     auto_declare<std::string>("joint", "joint_motor");
     auto_declare<double>("position_min_m", -1.0);
     auto_declare<double>("position_max_m", 0.0);
-    auto_declare<double>("max_velocity_mps", 0.020);
+    auto_declare<double>("max_velocity_mps", 0.080);
     auto_declare<double>("max_acceleration_mps2", 0.033333333);
     auto_declare<double>("max_jerk_mps3", 0.4);
     auto_declare<double>("default_velocity_scale", 0.80);

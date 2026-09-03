@@ -301,7 +301,7 @@ TEST(LiftController, BrakeGateAndEstopResetDoNotAdvanceOldTrajectory)
         rclcpp::Time((230 + cycle * 10) * 1'000'000LL, RCL_ROS_TIME), period),
       controller_interface::return_type::OK);
     ruckig_motion_seen = ruckig_motion_seen || std::abs(command_velocity) > 1.0e-8;
-    EXPECT_LE(std::abs(command_velocity), 0.020 + 1.0e-9);
+    EXPECT_LE(std::abs(command_velocity), 0.080 + 1.0e-9);
     EXPECT_LE(std::abs(command_acceleration), 0.033333333 + 1.0e-9);
   }
   EXPECT_TRUE(ruckig_motion_seen);
@@ -388,7 +388,7 @@ TEST(LiftController, BrakeGateAndEstopResetDoNotAdvanceOldTrajectory)
       controller->update(
         rclcpp::Time((1060 + cycle * 10) * 1'000'000LL, RCL_ROS_TIME), period),
       controller_interface::return_type::OK);
-    EXPECT_LE(std::abs(command_velocity), 0.020 + 1.0e-9);
+    EXPECT_LE(std::abs(command_velocity), 0.080 + 1.0e-9);
     EXPECT_LE(std::abs(command_acceleration), 0.033333333 + 1.0e-9);
     EXPECT_LE(std::abs(command_acceleration - previous_acceleration), 0.004 + 1.0e-6);
     previous_acceleration = command_acceleration;

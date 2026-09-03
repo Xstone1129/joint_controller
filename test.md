@@ -17,7 +17,7 @@ Lift 是垂直升降轴。真机测试前必须：
 
 以下三种方式不能同时运行：
 
-1. `tools/run_lift_ethercat_cli.sh` 直接占用 Master2。
+1. `tools/hardware/run_hardware_console.sh lift` 直接占用 EtherCAT 主站。
 2. 独立的 ROS lift launch。
 3. `joint-controller-stack-real.service` 完整机器人控制栈。
 
@@ -748,7 +748,7 @@ CLI 与 ROS 互斥，只能二选一：
 
 ```bash
 cd /home/user/joint_controller
-sudo ./tools/run_lift_ethercat_cli.sh
+sudo ./tools/hardware/run_hardware_console.sh lift
 ```
 
 快捷键：

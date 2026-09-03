@@ -162,7 +162,7 @@ private:
   int homing_timeout_ms_{60000};
   int drive_zero_timeout_ms_{5000};
   int startup_motion_guard_ms_{3000};
-  int max_rpm_{360};
+  int max_rpm_{1440};
   int position_limit_recovery_max_rpm_{300};
   int stop_window_max_rpm_{10};
   int overshoot_recovery_max_rpm_{10};
@@ -188,7 +188,7 @@ private:
   double command_epsilon_m_{0.0005};
   double command_epsilon_rpm_{1.0};
   double max_feedback_jump_m_{0.2};
-  double max_feedback_velocity_mps_{0.020};
+  double max_feedback_velocity_mps_{0.080};
   double feedback_velocity_tolerance_mps_{0.003};
   double position_min_m_{-1.0};
   double position_max_m_{0.0};

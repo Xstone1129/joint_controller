@@ -33,6 +33,8 @@ IGH_PID=""
 CHILD_PIDS=()
 CHILD_LABELS=()
 CLEANUP_STARTED=false
+HARDWARE_OWNER_LOCK=/run/lock/junior-hardware-owner.lock
+HARDWARE_OWNER_FD_OPEN=false
 
 resolve_graphical_session() {
     if [ -n "${GRAPHICAL_DISPLAY}" ] && [ -n "${GRAPHICAL_XAUTHORITY}" ]; then
@@ -101,6 +103,24 @@ cleanup_stack() {
     fi
 
     exit "${exit_code}"
+}
+
+acquire_hardware_owner() {
+    if [ "${SIM}" != "0.0" ]; then
+        return 0
+    fi
+    if [ "${EUID}" -ne 0 ]; then
+        echo "ERROR: REAL hardware owner lock requires root." >&2
+        return 1
+    fi
+    install -d -m 0770 "$(dirname -- "${HARDWARE_OWNER_LOCK}")"
+    eval "exec 9>\"${HARDWARE_OWNER_LOCK}\""
+    if ! flock -n 9; then
+        echo "ERROR: hardware is owned by non-ROS Direct server or another controller." >&2
+        eval 'exec 9>&-'
+        return 1
+    fi
+    HARDWARE_OWNER_FD_OPEN=true
 }
 
 monitor_stack() {
@@ -175,6 +195,8 @@ cleanup_stale_stack
 trap cleanup_stack EXIT
 trap 'exit 143' TERM
 trap 'exit 130' INT
+
+acquire_hardware_owner
 
 echo "============ 机器人启动脚本开始: ROS_DOMAIN_ID=${ROS_DOMAIN_ID}, ROS_LOCALHOST_ONLY=${ROS_LOCALHOST_ONLY}, RMW_IMPLEMENTATION=${RMW_IMPLEMENTATION}, CYCLONEDDS_URI=${CYCLONEDDS_URI} ============"
 echo "模式: sim=${SIM}, use_rviz=${USE_RVIZ}, enable_effort_mode_switch=${ENABLE_EFFORT_MODE_SWITCH}"

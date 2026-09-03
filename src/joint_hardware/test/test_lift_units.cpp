@@ -16,6 +16,7 @@ TEST(LiftUnits, UsesValidatedFeedUnitsAndSign)
     joint_hardware::lift::velocity_units_to_mps(10000, config), -0.003333333333, 1e-12);
   EXPECT_EQ(joint_hardware::lift::wire_rpm_to_velocity_units(360.0, config), 60000);
   EXPECT_NEAR(joint_hardware::lift::max_velocity_mps(360.0, config), 0.020, 1e-12);
+  EXPECT_NEAR(joint_hardware::lift::max_velocity_mps(1440.0, config), 0.080, 1e-12);
 }
 
 TEST(LiftUnits, ConvertsGearedEffectiveCarriageTravel)

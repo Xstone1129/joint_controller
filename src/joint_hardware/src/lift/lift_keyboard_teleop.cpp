@@ -100,8 +100,8 @@ public:
     joint_state_topic_ = declare_parameter<std::string>(
       "joint_state_topic", "/lift/joint_states");
 
-    if (!std::isfinite(speed_rpm_) || speed_rpm_ <= 0.0 || speed_rpm_ > 360.0) {
-      throw std::invalid_argument("speed_rpm must be in (0, 360]");
+    if (!std::isfinite(speed_rpm_) || speed_rpm_ <= 0.0 || speed_rpm_ > 1440.0) {
+      throw std::invalid_argument("speed_rpm must be in (0, 1440]");
     }
     if (!std::isfinite(lead_mm_per_rev_) || lead_mm_per_rev_ <= 0.0) {
       throw std::invalid_argument("lead_mm_per_rev must be positive");

@@ -47,7 +47,7 @@ def generate_launch_description():
         ("lift_sign", "-1.0", "mechanical direction sign"),
         ("position_min_m", "-1.0", "software lower travel limit"),
         ("position_max_m", "0.0", "software upper travel limit"),
-        ("max_rpm", "360", "mechanical maximum motor speed"),
+        ("max_rpm", "1440", "mechanical maximum motor speed"),
         (
             "position_limit_recovery_max_rpm",
             "300",

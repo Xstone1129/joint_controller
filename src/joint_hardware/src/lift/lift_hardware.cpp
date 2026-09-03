@@ -455,11 +455,11 @@ bool LiftHardware::parse_parameters()
     RCLCPP_ERROR(logger_, "max_rpm must be positive");
     return false;
   }
-  if (max_rpm_ > 360) {
+  if (max_rpm_ > 1440) {
     RCLCPP_WARN(
-      logger_, "max_rpm=%d exceeds the mechanical 360 rpm limit; clamping to 360",
+      logger_, "max_rpm=%d exceeds the mechanical 1440 rpm limit; clamping to 1440",
       max_rpm_);
-    max_rpm_ = 360;
+    max_rpm_ = 1440;
   }
   if (!get_optional(info_, "kp_rpm_per_m", kp_rpm_per_m_, get_double) ||
     !get_optional(info_, "kd_rpm_per_mps", kd_rpm_per_mps_, get_double) ||
@@ -579,7 +579,7 @@ bool LiftHardware::parse_parameters()
     homing_speed_high_units_s_ <= 0 || homing_speed_low_units_s_ <= 0 ||
     homing_acceleration_units_s2_ <= 0 || homing_timeout_ms_ <= 0 ||
     drive_zero_timeout_ms_ <= 0 ||
-    max_feedback_velocity_mps_ <= 0.0 || max_feedback_velocity_mps_ > 0.020 ||
+    max_feedback_velocity_mps_ <= 0.0 || max_feedback_velocity_mps_ > 0.080 ||
     feedback_velocity_tolerance_mps_ < 0.0 || kp_rpm_per_m_ < 0.0 ||
     kd_rpm_per_mps_ < 0.0 || velocity_slew_rpm_per_s_ < 0.0 ||
     stop_slew_rpm_per_s_ < 0.0 || brake_accel_rpm_per_s_ < 0.0 ||

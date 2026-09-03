@@ -12,6 +12,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <cerrno>
+#include <cctype>
 #include <cmath>
 #include <fcntl.h>
 #include <fstream>
@@ -158,30 +159,38 @@ std::string error_name(uint16_t code) {
 }
 
 bool discover_identity(uint32_t master, uint16_t position, uint32_t & vendor, uint32_t & product) {
-  std::ostringstream command;
-  command << "ethercat slaves -m " << master << " -v 2>/dev/null";
-  FILE * pipe = popen(command.str().c_str(), "r");
-  if (pipe == nullptr) return false;
-  std::string text; char buffer[512];
-  while (fgets(buffer, sizeof(buffer), pipe) != nullptr) text += buffer;
-  const int status = pclose(pipe);
-  if (status != 0) return false;
-  std::istringstream lines(text); std::string line; bool selected = false;
-  while (std::getline(lines, line)) {
-    const bool header = line.find("=== Master") != std::string::npos;
-    if (header && line.find("Slave " + std::to_string(position)) != std::string::npos) selected = true;
-    else if (header && selected) break;
-    if (!selected) continue;
-    auto parse = [&](const char * label, uint32_t & out) {
-      const auto at = line.find(label); if (at == std::string::npos) return false;
-      auto value = trim(line.substr(at + std::strlen(label)));
-      try { out = std::stoul(value, nullptr, 0); return true; } catch (...) { return false; }
-    };
-    if (parse("Vendor ID:", vendor) || parse("Vendor Id:", vendor)) {}
-    if (parse("Product code:", product)) {}
-    if (vendor != 0 && product != 0) return true;
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+  while (std::chrono::steady_clock::now() < deadline) {
+    vendor = 0;
+    product = 0;
+    std::ostringstream command;
+    command << "ethercat slaves -m " << master << " -v 2>/dev/null";
+    FILE * pipe = popen(command.str().c_str(), "r");
+    if (pipe != nullptr) {
+      std::string text; char buffer[512];
+      while (fgets(buffer, sizeof(buffer), pipe) != nullptr) text += buffer;
+      const int status = pclose(pipe);
+      if (status == 0) {
+        std::istringstream lines(text); std::string line; bool selected = false;
+        while (std::getline(lines, line)) {
+          const bool header = line.find("=== Master") != std::string::npos;
+          if (header && line.find("Slave " + std::to_string(position)) != std::string::npos) selected = true;
+          else if (header && selected) break;
+          if (!selected) continue;
+          auto parse = [&](const char * label, uint32_t & out) {
+            const auto at = line.find(label); if (at == std::string::npos) return false;
+            auto value = trim(line.substr(at + std::strlen(label)));
+            try { out = std::stoul(value, nullptr, 0); return true; } catch (...) { return false; }
+          };
+          if (parse("Vendor ID:", vendor) || parse("Vendor Id:", vendor)) {}
+          if (parse("Product code:", product)) {}
+          if (vendor != 0 && product != 0) return true;
+        }
+      }
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
   }
-  return vendor != 0 && product != 0;
+  return false;
 }
 
 struct Options {
@@ -204,6 +213,7 @@ struct Options {
   double max_speed_mps{0.015};
   double acceleration_mps2{0.033333333};
   bool auto_enable{false};
+  bool command_mode{false};
   bool interface_supplied{false};
   bool master_supplied{false};
   bool alias_supplied{false};
@@ -215,7 +225,7 @@ struct Options {
 };
 
 void usage(const char * name) {
-  std::cout << "Usage: " << name << " [--enable] [--interface IF] [--master N] [--alias N] [--position N] [--vendor ID] [--product ID] [--min-position M] [--max-position M] [--speed MPS] [--accel MPS2] [--zero-offset-file PATH] [--zero-offset-uid UID] [--zero-offset-gid GID] [--log PATH]\n"
+  std::cout << "Usage: " << name << " [--enable] [--command-mode] [--interface IF] [--master N] [--alias N] [--position N] [--vendor ID] [--product ID] [--min-position M] [--max-position M] [--speed MPS] [--accel MPS2] [--zero-offset-file PATH] [--zero-offset-uid UID] [--zero-offset-gid GID] [--log PATH]\n"
             << "Keys: e enable/hold, d disable, z zero, up/down arrows +/-100 mm task, hold u/j jog +/- coordinate, space stop, q quit\n";
 }
 }  // namespace
@@ -225,6 +235,7 @@ int main(int argc, char ** argv) {
   for (int i = 1; i < argc; ++i) {
     const std::string arg(argv[i]);
     if (arg == "--enable") options.auto_enable = true;
+    else if (arg == "--command-mode") options.command_mode = true;
     else if (arg == "--interface" && i + 1 < argc) { options.interface = argv[++i]; options.interface_supplied = true; }
     else if (arg == "--log" && i + 1 < argc) options.log_path = argv[++i];
     else if (arg == "--master" && i + 1 < argc) { options.master = std::stoul(argv[++i], nullptr, 0); options.master_supplied = true; }
@@ -283,7 +294,7 @@ int main(int argc, char ** argv) {
   }
 
   if ((options.vendor == 0 || options.product == 0) && !discover_identity(options.master, options.position, options.vendor, options.product)) {
-  std::cerr << "无法自动读取 lift 从站身份。请使用 tools/run_lift_ethercat_cli.sh 启动，"
+    std::cerr << "无法自动读取 lift 从站身份。请使用 tools/hardware/run_hardware_console.sh lift 启动，"
               << "或确认 /dev/EtherCAT" << options.master << " 存在；也可用 --vendor/--product 覆盖身份。\n";
     return 2;
   }
@@ -302,14 +313,28 @@ int main(int argc, char ** argv) {
   }
   std::cout << "激活 100 Hz PDO 周期..." << std::endl;
   if (!backend->start()) { std::cerr << "启动 EtherCAT 周期失败: " << backend->error_message() << "\n"; return 2; }
+  // Command-mode parents use this line as the process readiness handshake.
+  // Emit it immediately after the backend starts; waiting for the first PDO
+  // iteration made startup depend on pipe scheduling and could time out even
+  // while the CLI was already receiving valid PDOs.
+  if (options.command_mode) std::cout << "COMMAND_MODE_READY" << std::endl;
   LiftUnitConfig units{}; units.lead_mm_per_rev = options.lead_mm; units.lift_sign = options.sign;
   units.command_units_per_rev = options.units; units.effective_command_units_per_rev = options.units;
 
   TerminalRawMode terminal;
-  if (!terminal.active()) {
+  if (!options.command_mode && !terminal.active()) {
     std::cerr << "CLI 必须在交互终端中运行。\n";
     (void)backend->stop();
     return 2;
+  }
+  int command_input_flags = -1;
+  if (options.command_mode) {
+    command_input_flags = fcntl(STDIN_FILENO, F_GETFL, 0);
+    if (command_input_flags < 0 || fcntl(STDIN_FILENO, F_SETFL, command_input_flags | O_NONBLOCK) != 0) {
+      std::cerr << "无法配置 command mode 输入管道。\n";
+      (void)backend->stop();
+      return 2;
+    }
   }
   LiftRxPdo output{}; LiftTxPdo input{}; Cia402Controller cia(3, 10);
   int32_t zero = 0;
@@ -417,6 +442,54 @@ int main(int argc, char ** argv) {
       default: break;
     }
   };
+  auto issue_command = [&](const std::string & raw) {
+    const auto command = trim(raw);
+    if (command.empty()) return;
+    std::istringstream input_line(command);
+    std::string verb; input_line >> verb;
+    for (auto & c : verb) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    if (verb == "ENABLE") { issue_key('e'); return; }
+    if (verb == "DISABLE") { issue_key('d'); return; }
+    if (verb == "ZERO") { issue_key('z'); return; }
+    if (verb == "HOME") {
+      if (!have_sample) return;
+      if (fault_latched) {
+        last_action = "home refused: drive fault is latched; press e after inspection to retry";
+        return;
+      }
+      jog_direction = 0;
+      enable = true;
+      target = 0.0;
+      last_action = "home requested: moving to logical zero";
+      return;
+    }
+    if (verb == "HOLD") {
+      if (!have_sample) return;
+      target = position_units_to_m(input.actual_position_units, zero, units);
+      jog_direction = 0;
+      last_joint_rpm = 0.0;
+      last_action = enable ? "holding current position" : "disabled at current position";
+      return;
+    }
+    if (verb == "QUIT") { issue_key('q'); return; }
+    if (verb == "MOVE_STEP") {
+      double delta = 0.0;
+      if (!(input_line >> delta) || !std::isfinite(delta) || std::abs(delta) > 0.1) {
+        last_action = "MOVE_STEP refused: delta must be finite and <= 0.1 m";
+        return;
+      }
+      if (!have_sample || fault_latched || !enable) {
+        last_action = "MOVE_STEP refused: lift must be enabled and fault-free";
+        return;
+      }
+      const double position = position_units_to_m(input.actual_position_units, zero, units);
+      target = std::clamp(position + delta, options.min_m, options.max_m);
+      jog_direction = 0; enable = true;
+      last_action = "MOVE_STEP target=" + std::to_string(target);
+      return;
+    }
+    last_action = "unknown command: " + command;
+  };
   std::cout << "lift EtherCAT CLI 已连接。诊断日志: " << options.log_path << std::endl;
   if (options.auto_enable) { enable = true; last_action = "enable requested"; }
   const auto trace_start = std::chrono::steady_clock::now();
@@ -436,10 +509,19 @@ int main(int argc, char ** argv) {
   EthercatLinkState logged_link = EthercatLinkState::offline;
   std::string logged_gate;
   std::string pending_terminal_input;
+  std::string command_input;
   while (running.load()) {
     char keys[32];
     const ssize_t count = read(STDIN_FILENO, keys, sizeof(keys));
     if (count > 0) {
+      if (options.command_mode) {
+        command_input.append(keys, static_cast<size_t>(count));
+        size_t newline = 0;
+        while ((newline = command_input.find('\n')) != std::string::npos) {
+          issue_command(command_input.substr(0, newline));
+          command_input.erase(0, newline + 1);
+        }
+      } else {
       pending_terminal_input.append(keys, static_cast<size_t>(count));
       while (!pending_terminal_input.empty()) {
         if (pending_terminal_input.front() != '\033') {
@@ -458,6 +540,10 @@ int main(int argc, char ** argv) {
           pending_terminal_input.erase(0, 1);
         }
       }
+      }
+    } else if (count == 0 && options.command_mode) {
+      enable = false;
+      running.store(false);
     } else if (count < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
       last_action = "terminal read error";
       running.store(false);
@@ -618,7 +704,7 @@ int main(int argc, char ** argv) {
       logged_gate = motion_gate;
       next_trace = now + std::chrono::milliseconds(100);
     }
-    if (now >= next_render) {
+    if (!options.command_mode && now >= next_render) {
       std::cout << "\033[2J\033[H" << "Lift EtherCAT test (Master" << options.master << ", " << options.interface << ")\n"
         << "position: " << std::fixed << std::setprecision(4) << position << " m   velocity: " << velocity << " m/s\n"
         << "state: " << state_name(state) << "   status: 0x" << std::hex << std::setw(4) << std::setfill('0') << input.status_word << std::dec << "   mode: " << static_cast<int>(input.mode_display) << "\n"
@@ -642,5 +728,6 @@ int main(int argc, char ** argv) {
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
   output.control_word = 0x0006; output.target_velocity_units_per_s = 0; (void)backend->write_pdo(output); (void)backend->stop();
+  if (command_input_flags >= 0) (void)fcntl(STDIN_FILENO, F_SETFL, command_input_flags);
   return 0;
 }

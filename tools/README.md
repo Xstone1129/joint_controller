@@ -17,19 +17,17 @@ sudo ./tools/lift_ethercat_cli
 The build script compiles only this CLI and the ROS-independent EtherCAT lift
 driver sources. `colcon build` is not required.
 
-Use `run_lift_ethercat_cli.sh` as the hardware entry point. It reads
-`MASTER2_DEVICE` from the EtherLab system configuration, brings that NIC up,
-starts EtherLab when `/dev/EtherCAT2` is absent, verifies the Master2 device,
-and then execs the standalone CLI:
+The unified hardware console is the hardware entry point. It configures all
+three EtherCAT masters, then starts the standalone lift CLI when `lift` is
+selected:
 
 ```bash
 ./tools/build_lift_ethercat_cli.sh
-sudo ./tools/run_lift_ethercat_cli.sh
+sudo ./tools/hardware/run_hardware_console.sh lift
 ```
 
-The launcher does not start ROS. It also does not stop EtherLab on exit,
-because stopping the service would tear down the other configured EtherCAT
-masters used by the robot arms.
+The console does not start ROS. The low-level CLI binary remains in `tools/`
+because the unified console invokes it for lift testing.
 
 The CLI uses immediate single-key commands: `e` (enable/hold), `d` (disable),
 `z` (set the current encoder position as zero), `u`/`j` (hold-to-jog up/down,
@@ -49,3 +47,17 @@ upper limit. `e` only enables and holds the current position.
 
 The tool always starts disabled. It sends zero CSV velocity and CiA402 shutdown
 on `stop`, exit, Ctrl-C, or an EtherCAT PDO failure.
+
+## Unified EtherCAT hardware console
+
+The combined ROS-free heavy_v1 console is in `tools/hardware/`. There is only
+one hardware console entry point; use:
+
+```bash
+sudo ./tools/hardware/run_hardware_console.sh
+```
+
+It configures the three EtherCAT masters and provides the arm or lift test
+selection. Run `./tools/hardware/run_hardware_console.sh --check` for a
+read-only host check, or `./tools/hardware/run_hardware_console.sh --self-test`
+for the offline configuration and shared-memory ABI tests.
