@@ -218,8 +218,8 @@ controller_interface::CallbackReturn RobotController_arm::on_init()
       "joint_limit_guard.overrun_damping_scale",
       joint_limit_guard_defaults.overrun_damping_scale);
   auto_declare<double>("joint_limit_guard.max_torque_ratio", joint_limit_guard_defaults.max_torque_ratio);
-  auto_declare<double>("heavy_v1.max_velocity_rad_s", 0.3);
-  auto_declare<double>("heavy_v1.max_acceleration_rad_s2", 1.0);
+  auto_declare<double>("heavy_v1.max_velocity_rad_s", std::numeric_limits<double>::quiet_NaN());
+  auto_declare<double>("heavy_v1.max_acceleration_rad_s2", std::numeric_limits<double>::quiet_NaN());
   auto_declare<bool>("heavy_v1.allow_disabled_simulation_execution", false);
 
   RCLCPP_INFO(get_node()->get_logger(), "Controller arm initialized joint_names size: %zu", joint_names_.size());
@@ -318,14 +318,16 @@ controller_interface::CallbackReturn RobotController_arm::on_configure(const rcl
         "joint_limit_guard.max_torque_ratio",
         joint_limit_guard_config.max_torque_ratio,
         0.35);
-    get_node()->get_parameter_or("heavy_v1.max_velocity_rad_s", heavy_max_velocity_, 0.3);
-    get_node()->get_parameter_or("heavy_v1.max_acceleration_rad_s2", heavy_max_acceleration_, 1.0);
+    get_node()->get_parameter("heavy_v1.max_velocity_rad_s", heavy_max_velocity_rad_s_);
+    get_node()->get_parameter(
+      "heavy_v1.max_acceleration_rad_s2", heavy_max_acceleration_rad_s2_);
     get_node()->get_parameter_or(
         "heavy_v1.allow_disabled_simulation_execution",
         allow_disabled_simulation_execution_, false);
 
-    if (!std::isfinite(heavy_max_velocity_) || heavy_max_velocity_ <= 0.0 ||
-        !std::isfinite(heavy_max_acceleration_) || heavy_max_acceleration_ <= 0.0) {
+    if (!std::isfinite(heavy_max_velocity_rad_s_) || heavy_max_velocity_rad_s_ <= 0.0 ||
+        !std::isfinite(heavy_max_acceleration_rad_s2_) ||
+        heavy_max_acceleration_rad_s2_ <= 0.0) {
         RCLCPP_ERROR(get_node()->get_logger(), "Invalid Heavy V1 arm motion limits");
         return CallbackReturn::ERROR;
     }
@@ -745,8 +747,8 @@ controller_interface::return_type RobotController_arm::update(const rclcpp::Time
           } else {
             applied = command_processor_->processHeavyPositionCommand(
               heavy_setpoint.position, heavy_setpoint.velocity, heavy_setpoint.acceleration,
-              velocity_provided, acceleration_provided, heavy_max_velocity_,
-              heavy_max_acceleration_, &error);
+              velocity_provided, acceleration_provided, heavy_max_velocity_rad_s_,
+              heavy_max_acceleration_rad_s2_, &error);
           }
         } else if (heavy_setpoint.mode ==
           robot_control_msg::msg::HeavyUpperBodyGatewayCommandV1::MODE_HOLD) {

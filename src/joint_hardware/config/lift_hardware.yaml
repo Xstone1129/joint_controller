@@ -21,13 +21,19 @@ dc_assign_activate: 0
 dc_sync0_shift_ns: 0
 
 motor_id: LVM08008H3G3-M17
-lead_mm_per_rev: 10.0
+# Effective carriage travel for one motor revolution: 10 mm ballscrew lead
+# through the 3:1 reduction, so the carriage moves 10 / 3 mm per motor rev.
+lead_mm_per_rev: 3.333333333
 lift_sign: -1.0
 command_units_per_rev: 10000
 encoder_counts_per_rev: 131072
-position_min_m: -1.0
-position_max_m: 0.0
-max_rpm: 360
+position_min_m: -1
+position_max_m: 0
+# Photoelectric homing is the only path allowed above position_max_m. Bound
+# that search relative to the position where reset starts, because the
+# pre-calibration boot coordinate may call any physical lift height zero.
+reset_max_search_travel_m: 0.85
+max_rpm: 1440
 # When feedback is outside the software travel, only an explicit command back
 # into the valid range is accepted, at no more than this recovery speed.
 position_limit_recovery_max_rpm: 300
@@ -51,7 +57,7 @@ lift_velocity_direct_stop_in_stop_window: false
 lift_stationary_velocity_threshold_mps: 0.001
 command_epsilon_m: 0.0005
 max_feedback_jump_m: 0.2
-max_feedback_velocity_mps: 0.060
+max_feedback_velocity_mps: 0.08
 feedback_velocity_tolerance_mps: 0.003
 lift_motion_command_period_ms: 10
 
@@ -60,8 +66,12 @@ lift_startup_motion_guard_ms: 3000
 
 reset_velocity_rpm: 96
 reset_velocity_period_ms: 50
-reset_velocity_timeout_ms: 10000
-reset_velocity_debug_enabled: false
+# The app refreshes this takeover while both the global safety state and the
+# lift_upper signal remain fresh. Process/network loss therefore stops motion.
+reset_velocity_timeout_ms: 1000
+# This takeover is exposed only through the guarded `junior_cli lift reset`
+# flow: fresh lift_upper + NORMAL safety state + watchdog + travel bound.
+reset_velocity_debug_enabled: true
 # LD3M HM defaults to method 19 (HOME-SWITCH state change). Select a method
 # matching the actual HOME/POT/NOT/Z wiring before enabling this service.
 homing_method: 19

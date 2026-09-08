@@ -14,11 +14,11 @@
   <xacro:arg name="dc_sync0_shift_ns" default="0"/>
   <xacro:arg name="command_units_per_rev" default="10000"/>
   <xacro:arg name="encoder_counts_per_rev" default="131072"/>
-  <xacro:arg name="lead_mm_per_rev" default="10.0"/>
+  <xacro:arg name="lead_mm_per_rev" default="3.333333333"/>
   <xacro:arg name="lift_sign" default="-1.0"/>
   <xacro:arg name="position_min_m" default="-1.0"/>
   <xacro:arg name="position_max_m" default="0.0"/>
-  <xacro:arg name="max_rpm" default="360"/>
+  <xacro:arg name="max_rpm" default="1440"/>
   <xacro:arg name="position_limit_recovery_max_rpm" default="300"/>
   <xacro:arg name="brake_control_enabled" default="false"/>
   <xacro:arg name="limit_switch_enabled" default="false"/>
@@ -35,6 +35,8 @@
   <xacro:arg name="mode_mismatch_debounce_cycles" default="5"/>
   <xacro:arg name="use_persistent_zero_offset" default="false"/>
   <xacro:arg name="zero_offset_file" default="/tmp/joint_hardware_lift_zero_offset.cfg"/>
+
+  <xacro:property name="lift_cfg" value="${xacro.load_yaml('$(arg hardware_config_file)')}"/>
 
   <xacro:include filename="$(find joint_hardware)/description/lift.ros2_control.xacro"/>
   <xacro:joint_lift_ros2_control
@@ -80,6 +82,10 @@
     <parent link="lift_base"/>
     <child link="lift_carriage"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-1.0" upper="0.0" velocity="0.060" effort="1000.0"/>
+    <limit
+      lower="${lift_cfg['position_min_m']}"
+      upper="${lift_cfg['position_max_m']}"
+      velocity="${lift_cfg['max_feedback_velocity_mps']}"
+      effort="1000.0"/>
   </joint>
 </robot>

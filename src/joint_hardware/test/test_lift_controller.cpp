@@ -301,8 +301,8 @@ TEST(LiftController, BrakeGateAndEstopResetDoNotAdvanceOldTrajectory)
         rclcpp::Time((230 + cycle * 10) * 1'000'000LL, RCL_ROS_TIME), period),
       controller_interface::return_type::OK);
     ruckig_motion_seen = ruckig_motion_seen || std::abs(command_velocity) > 1.0e-8;
-    EXPECT_LE(std::abs(command_velocity), 0.060 + 1.0e-9);
-    EXPECT_LE(std::abs(command_acceleration), 0.10 + 1.0e-9);
+    EXPECT_LE(std::abs(command_velocity), 0.080 + 1.0e-9);
+    EXPECT_LE(std::abs(command_acceleration), 0.033333333 + 1.0e-9);
   }
   EXPECT_TRUE(ruckig_motion_seen);
   EXPECT_DOUBLE_EQ(command_power_enable, 1.0);
@@ -381,15 +381,15 @@ TEST(LiftController, BrakeGateAndEstopResetDoNotAdvanceOldTrajectory)
     controller->update(rclcpp::Time(1'050'000'000LL, RCL_ROS_TIME), period),
     controller_interface::return_type::OK);
   EXPECT_GT(std::abs(command_velocity), 0.0);
-  EXPECT_LE(std::abs(command_acceleration), 0.10 + 1.0e-9);
+  EXPECT_LE(std::abs(command_acceleration), 0.033333333 + 1.0e-9);
   double previous_acceleration = command_acceleration;
   for (int cycle = 0; cycle < 500; ++cycle) {
     ASSERT_EQ(
       controller->update(
         rclcpp::Time((1060 + cycle * 10) * 1'000'000LL, RCL_ROS_TIME), period),
       controller_interface::return_type::OK);
-    EXPECT_LE(std::abs(command_velocity), 0.060 + 1.0e-9);
-    EXPECT_LE(std::abs(command_acceleration), 0.10 + 1.0e-9);
+    EXPECT_LE(std::abs(command_velocity), 0.080 + 1.0e-9);
+    EXPECT_LE(std::abs(command_acceleration), 0.033333333 + 1.0e-9);
     EXPECT_LE(std::abs(command_acceleration - previous_acceleration), 0.004 + 1.0e-6);
     previous_acceleration = command_acceleration;
   }
@@ -568,6 +568,23 @@ TEST(LiftController, HeavyLeaseArbitratesLegacyWriterAndKeepsSafetyStopAvailable
   EXPECT_DOUBLE_EQ(command_acceleration, 0.01);
   spin_delivery(executor);
   EXPECT_EQ(acknowledged_sequence.load(), 43U);
+
+  // Once streaming is active, every subsequent Heavy sample must replace the
+  // previous command and survive the mode-update phase in the same cycle.
+  heavy.sequence = 44;
+  heavy.position[0] = -0.18;
+  heavy.velocity[0] = 0.015;
+  heavy.acceleration[0] = 0.02;
+  heavy_publisher->publish(heavy);
+  spin_delivery(executor);
+  ASSERT_EQ(
+    controller->update(rclcpp::Time(270'000'000LL, RCL_ROS_TIME), period),
+    controller_interface::return_type::OK);
+  EXPECT_DOUBLE_EQ(command_position, -0.18);
+  EXPECT_DOUBLE_EQ(command_velocity, 0.015);
+  EXPECT_DOUBLE_EQ(command_acceleration, 0.02);
+  spin_delivery(executor);
+  EXPECT_EQ(acknowledged_sequence.load(), 44U);
 
   gate.data = false;
   gate_publisher->publish(gate);

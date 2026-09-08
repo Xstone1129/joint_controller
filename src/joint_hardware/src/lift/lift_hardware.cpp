@@ -432,13 +432,23 @@ bool LiftHardware::parse_parameters()
     return false;
   }
   if (!get_optional(info_, "position_min_m", position_min_m_, get_double) ||
-    !get_optional(info_, "position_max_m", position_max_m_, get_double))
+    !get_optional(info_, "position_max_m", position_max_m_, get_double) ||
+    !get_optional(
+      info_, "reset_max_search_travel_m", reset_max_search_travel_m_, get_double))
   {
     RCLCPP_ERROR(logger_, "position software limits must be finite numbers");
     return false;
   }
+  if (!std::isfinite(position_min_m_) || !std::isfinite(position_max_m_)) {
+    RCLCPP_ERROR(logger_, "position_min_m and position_max_m must be finite numbers");
+    return false;
+  }
   if (position_min_m_ > position_max_m_) {
     std::swap(position_min_m_, position_max_m_);
+  }
+  if (!std::isfinite(reset_max_search_travel_m_) || reset_max_search_travel_m_ <= 0.0) {
+    RCLCPP_ERROR(logger_, "reset_max_search_travel_m must be finite and positive");
+    return false;
   }
 
   if (!get_optional(info_, "max_rpm", max_rpm_, get_int)) {
@@ -448,12 +458,6 @@ bool LiftHardware::parse_parameters()
   if (max_rpm_ <= 0) {
     RCLCPP_ERROR(logger_, "max_rpm must be positive");
     return false;
-  }
-  if (max_rpm_ > 360) {
-    RCLCPP_WARN(
-      logger_, "max_rpm=%d exceeds the mechanical 360 rpm limit; clamping to 360",
-      max_rpm_);
-    max_rpm_ = 360;
   }
   if (!get_optional(info_, "kp_rpm_per_m", kp_rpm_per_m_, get_double) ||
     !get_optional(info_, "kd_rpm_per_mps", kd_rpm_per_mps_, get_double) ||
@@ -573,7 +577,7 @@ bool LiftHardware::parse_parameters()
     homing_speed_high_units_s_ <= 0 || homing_speed_low_units_s_ <= 0 ||
     homing_acceleration_units_s2_ <= 0 || homing_timeout_ms_ <= 0 ||
     drive_zero_timeout_ms_ <= 0 ||
-    max_feedback_velocity_mps_ <= 0.0 || max_feedback_velocity_mps_ > 0.060 ||
+    max_feedback_velocity_mps_ <= 0.0 ||
     feedback_velocity_tolerance_mps_ < 0.0 || kp_rpm_per_m_ < 0.0 ||
     kd_rpm_per_mps_ < 0.0 || velocity_slew_rpm_per_s_ < 0.0 ||
     stop_slew_rpm_per_s_ < 0.0 || brake_accel_rpm_per_s_ < 0.0 ||
@@ -1320,8 +1324,14 @@ hardware_interface::return_type LiftHardware::read(
   observe_feedback_continuity(
     position, sample_time_ns,
     fresh && !transport_fault_active_.load(std::memory_order_acquire));
+  const bool reset_search_active = reset_velocity_request_.load(std::memory_order_acquire);
+  const double reset_search_start =
+    reset_search_start_position_m_.load(std::memory_order_acquire);
+  const bool reset_upper_override = reset_search_active &&
+    position >= reset_search_start - command_epsilon_m_ &&
+    position <= reset_search_start + reset_max_search_travel_m_ + command_epsilon_m_;
   const bool position_outside_limits = position < position_min_m_ - command_epsilon_m_ ||
-    position > position_max_m_ + command_epsilon_m_;
+    (position > position_max_m_ + command_epsilon_m_ && !reset_upper_override);
   const bool was_outside_limits = position_limit_violation_.exchange(
     position_outside_limits, std::memory_order_acq_rel);
   if (position_outside_limits) {
@@ -1329,7 +1339,9 @@ hardware_interface::return_type LiftHardware::read(
     if (!motion_blocked_.load(std::memory_order_acquire)) {
       error_reason_code_.store(3, std::memory_order_release);
       if (!was_outside_limits) {
-        // Stop once on entry. A later explicit enable may recover only toward
+        // Stop once on entry. The photoelectric reset may cross the normal
+        // upper bound only while its bounded, watchdog-backed takeover is
+        // active. A later explicit enable may recover only toward
         // the configured software range; repeatedly forcing this request here
         // would make that safe recovery impossible.
         brake_request_enable_.store(false, std::memory_order_release);
@@ -2244,6 +2256,9 @@ void LiftHardware::publish_driver_status()
     (std::abs(target_wire_rpm_atomic_.load()) > command_epsilon_rpm_ ? "true" : "false")
          << ",\"reset_velocity_active\":" <<
     (reset_velocity_request_.load() ? "true" : "false")
+         << ",\"reset_search_start_position\":" <<
+    reset_search_start_position_m_.load()
+         << ",\"reset_max_search_travel\":" << reset_max_search_travel_m_
          << ",\"reset_hold_active\":" <<
     (reset_hold_request_.load() ? "true" : "false")
          << ",\"homing_active\":" <<
@@ -2259,8 +2274,15 @@ void LiftHardware::publish_driver_status()
          << (brake_stop_timeout_.load() ? "true" : "false")
          << ",\"brake_feedback\":\"inferred_from_cia402_and_timing\""
          << ",\"limit_switch_enabled\":" << (limit_switch_enabled_ ? "true" : "false")
+         << ",\"actual_position_units\":" << feedback_position_units_.load()
          << ",\"zero_offset_units\":" << zero_offset_units_atomic_.load()
          << ",\"zero_offset_valid\":" << (zero_offset_loaded_ ? "true" : "false")
+         << ",\"effective_command_units_per_rev\":" <<
+    lift::effective_command_units_per_rev(unit_config_)
+         << ",\"effective_lead_mm_per_rev\":" << unit_config_.lead_mm_per_rev
+         << ",\"position_m_per_unit\":" <<
+    unit_config_.lead_mm_per_rev /
+    (1000.0 * lift::effective_command_units_per_rev(unit_config_))
          << ",\"feedback_baseline_valid\":" <<
     (feedback_baseline_valid_.load() ? "true" : "false")
          << ",\"feedback_epoch\":" << feedback_epoch_.load()
@@ -2359,12 +2381,19 @@ void LiftHardware::handle_reset_velocity(
       return;
     }
     brake_request_enable_.store(true, std::memory_order_release);
-    reset_velocity_request_.store(true, std::memory_order_release);
+    const bool was_active =
+      reset_velocity_request_.exchange(true, std::memory_order_acq_rel);
+    if (!was_active) {
+      reset_search_start_position_m_.store(
+        feedback_position_m_.load(std::memory_order_acquire), std::memory_order_release);
+    }
     reset_velocity_stop_pending_.store(false, std::memory_order_release);
     reset_hold_request_.store(false, std::memory_order_release);
     reset_velocity_start_time_ = std::chrono::steady_clock::now();
     response->success = true;
-    response->message = "reset velocity takeover requested through CSV/PDO";
+    response->message = was_active ?
+      "reset velocity watchdog refreshed" :
+      "bounded reset velocity takeover requested through CSV/PDO";
   } else {
     reset_velocity_request_.store(false, std::memory_order_release);
     reset_velocity_stop_pending_.store(true, std::memory_order_release);

@@ -1,3 +1,124 @@
+# ===================
+# ROS 2 / Colcon 编译产物（你这次踩坑的核心）
+# ===================
 build/
 install/
 log/
+*.pyc
+*.pyo
+
+# ===================
+# CMake 编译缓存（C++ 工程必备）
+# ===================
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+CMakeUserPresets.json
+*.cmake
+!CMakeLists.txt
+!*.cmake.in
+
+# ===================
+# 编译中间文件（.o 和可执行文件）
+# ===================
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+*.out
+
+# ===================
+# Python 缓存与虚拟环境
+# ===================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ===================
+# VSCode 编辑器配置（强烈建议忽略）
+# 如果不忽略，别人拉你的代码会带进他自己的本地配置
+# ===================
+.vscode/
+*.code-workspace
+
+# ===================
+# 其他 IDE（CLion / Qt / Vim）
+# ===================
+.idea/
+*.iml
+.clangd/
+.cache/
+*.swp
+*.swo
+*~
+tags
+
+# ===================
+# 系统垃圾文件（Mac / Windows）
+# ===================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# ===================
+# 数据、日志与录包文件（容易极大，绝对不能提交）
+# ===================
+*.log
+*.bag
+*.mcap
+*.db3
+*.sqlite
+*.csv
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.mp4
+*.avi
+*.zip
+*.tar.gz
+*.tgz
+
+# ===================
+# 环境变量与密钥（安全）
+# ===================
+.env
+.env.local
+*.pem
+*.key
+*.crt
+
+# ===================
+# 文档临时编译产物（如果你用 LaTeX 或 Doxygen）
+# ===================
+docs/_build/
+docs/api/
+*.aux
+*.toc
+
+# ===================
+# 针对你这次 `git add .` 误操作的特别防护
+# （防止以后误把 yaml 备份或 test 临时文件提交）
+# ===================
+*_backup.yaml
+*_old.yaml
+test_*.py
+temp_*

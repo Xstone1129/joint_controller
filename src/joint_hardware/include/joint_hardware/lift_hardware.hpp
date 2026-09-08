@@ -153,7 +153,7 @@ private:
   int motion_command_period_ms_{10};
   int reset_velocity_rpm_{96};
   int reset_velocity_period_ms_{50};
-  int reset_velocity_timeout_ms_{10000};
+  int reset_velocity_timeout_ms_{1000};
   int homing_method_{19};
   int homing_speed_high_units_s_{10000};
   int homing_speed_low_units_s_{5000};
@@ -162,7 +162,7 @@ private:
   int homing_timeout_ms_{60000};
   int drive_zero_timeout_ms_{5000};
   int startup_motion_guard_ms_{3000};
-  int max_rpm_{360};
+  int max_rpm_{0};
   int position_limit_recovery_max_rpm_{300};
   int stop_window_max_rpm_{10};
   int overshoot_recovery_max_rpm_{10};
@@ -188,10 +188,11 @@ private:
   double command_epsilon_m_{0.0005};
   double command_epsilon_rpm_{1.0};
   double max_feedback_jump_m_{0.2};
-  double max_feedback_velocity_mps_{0.060};
+  double max_feedback_velocity_mps_{std::numeric_limits<double>::quiet_NaN()};
   double feedback_velocity_tolerance_mps_{0.003};
-  double position_min_m_{-1.0};
-  double position_max_m_{0.0};
+  double position_min_m_{std::numeric_limits<double>::quiet_NaN()};
+  double position_max_m_{std::numeric_limits<double>::quiet_NaN()};
+  double reset_max_search_travel_m_{0.85};
   // Releasing a vertical-axis brake must always be an explicit opt-in.
   bool brake_control_enabled_{false};
   bool limit_switch_enabled_{false};
@@ -236,6 +237,7 @@ private:
     static_cast<uint8_t>(BrakeStopPhase::disabled)};
   std::atomic<bool> reset_velocity_request_{false};
   std::atomic<bool> reset_velocity_stop_pending_{false};
+  std::atomic<double> reset_search_start_position_m_{0.0};
   std::atomic<bool> reset_hold_request_{false};
   std::atomic<bool> zero_request_pending_{false};
   std::atomic<double> reset_hold_target_m_{0.0};

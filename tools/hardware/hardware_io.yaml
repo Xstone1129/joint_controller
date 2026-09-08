@@ -1,0 +1,83 @@
+# Standalone EtherCAT hardware layout for the heavy_v1 test console.
+# The console uses this file for EtherLab binding and for the arm shared-memory
+# test. It does not load ROS or ros2_control.
+
+schema_version: 1
+config_revision: 1
+robot_variant: heavy_v1
+
+server:
+  listen_address: 0.0.0.0
+  port: 7447
+  heartbeat_timeout_s: 0.75
+  tls:
+    enabled: false
+    ca_file: ""
+    cert_file: ""
+    key_file: ""
+
+ethercat:
+  init_script: /etc/init.d/ethercat
+  sysconfig_file: /usr/local/etherlab/etc/sysconfig/ethercat
+  conf_file: /usr/local/etherlab/etc/ethercat.conf
+  library_dir: /usr/local/etherlab/lib
+  device_modules: generic
+  network_manager_unmanaged_file: /etc/NetworkManager/conf.d/90-robot-ethercat-unmanaged.conf
+  masters:
+    left_arm:
+      index: 0
+      interface: enp3s0
+      expected_slaves: 7
+    right_arm:
+      index: 1
+      interface: enp4s0
+      expected_slaves: 7
+    lift:
+      index: 2
+      interface: enp5s0
+      expected_slaves: 1
+
+arm:
+  driver_binary: ../../build/erobot_igh_driver/igh_driver
+  driver_log: /tmp/heavy_v1_igh_driver.log
+  shared_memory:
+    desire: Ethercat_axis_desire
+    real: Ethercat_axis_real
+  # The legacy IGH driver uses one global power request. Selecting arm enables
+  # the 14 arm axes on both Master0 and Master1 together.
+  axis_slots:
+    left_arm: [0, 1, 2, 3, 4, 5, 6]
+    right_arm: [7, 8, 9, 10, 11, 12, 13]
+  axis_count: 14
+  operation_enabled_status: 0x27
+  csp_mode: 0x08
+  position_units_per_rad: 83443.02680376362
+  max_step_rad: 0.1
+  jog_step_rad: 0.005
+  max_speed_rad_s: 0.05
+  limit_stall_timeout_s: 0.5
+  # ZeroLegacy axes report position in small bursts; this is the minimum
+  # encoder progress that refreshes the stall watchdog (about 8 counts).
+  limit_progress_tolerance_rad: 0.0001
+  limit_position_tolerance_rad: 0.001
+  limits_urdf: ../../src/robot_arm_description/urdf/right_left_arm.urdf
+  zero_offset_file: /home/user/.local/state/joint_controller/arm_zero_offsets.yaml
+  # Keep this longer than the driver's 60-second OP wait so the server can
+  # report the driver's detailed timeout instead of killing it first.
+  feedback_ready_timeout_s: 65.0
+  enable_timeout_s: 8.0
+  disable_settle_s: 1.0
+
+lift:
+  cli_binary: ../lift_ethercat_cli
+  master: 2
+  interface: enp5s0
+  slave_alias: 0
+  slave_position: 0
+  min_position_m: -1.0
+  max_position_m: 1.0
+  jog_step_m: 0.01
+  max_step_m: 0.1
+  max_speed_mps: 0.015
+  acceleration_mps2: 0.033333333
+  zero_offset_file: /home/user/.local/state/joint_controller/lift_zero_offset.cfg

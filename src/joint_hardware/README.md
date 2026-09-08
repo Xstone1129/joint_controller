@@ -56,9 +56,11 @@ The lift uses CSV (`6060h=9`, confirmed by `6061h=9`) and the following PDOs:
 - TxPDO: `6041h`, `603Fh`, `6061h`, `6064h`, `606Ch`, reserved `60FDh` input.
 
 `608Fh`, `6091h` and `6092h` are read during configure. The position and velocity
-conversion uses the validated 6091/6092 feed ratio, a 10 mm/rev screw and `lift_sign=-1`;
-the 17-bit encoder count (`131072`) is not used as the 60FFh unit. The mechanical
-velocity limit remains 360 rpm (0.060 m/s), and software limits are `[-1.0, 0.0] m`.
+conversion uses the validated 6091/6092 feed ratio, a 10 mm/rev screw, the 3:1
+reduction, and `lift_sign=-1`; the effective carriage travel is 3.333333333
+mm/rev at the motor. The 17-bit encoder count (`131072`) is not used as the
+60FFh unit. The mechanical velocity limit is 1440 rpm (0.080 m/s), and
+software limits are `[-1.0, 0.0] m`.
 The effective command units/rev follow the manual: nonzero `2008h(P00.08)` wins;
 otherwise `6092:01` wins when it differs from `608F:01`, and `6091:01/02` is used
 only when those two values are equal.
@@ -171,7 +173,7 @@ writes `joint_motor/power_enable` through ros2_control. `/lift_brake_command`
 remains a compatibility and safety entry point; an external disable is latched
 and cannot be overwritten by a command that was already high. A new false-to-
 true command edge is required before re-enable. A position command is still
-clamped to `[-1.0, 0.0] m` and the outer loop never exceeds 360 rpm (0.060 m/s).
+clamped to `[-1.0, 0.0] m` and the outer loop never exceeds 1440 rpm (0.080 m/s).
 
 The launch file exposes the validated unit and safety values directly. If the
 drive reports a command-unit value other than 10000, pass the confirmed value
@@ -190,7 +192,7 @@ one-axis Ruckig OTG and claim the synchronized `position`, `velocity`,
 `acceleration` and `power_enable` command interfaces of `joint_motor`.
 `LiftHardware` then applies
 the second-layer P/D outer loop, terminal slowdown, overshoot protection, the
-360 rpm limit, slope limit and final software-direction checks before converting
+1440 rpm limit, slope limit and final software-direction checks before converting
 the result to `60FFh` units/s.
 
 The nominal limits are:
@@ -200,13 +202,15 @@ The nominal limits are:
 | control/EtherCAT period | 10 | ms |
 | software travel | -1.0 to 0.0 | m |
 | screw lead | 10 | mm/rev |
+| reduction ratio | 3:1 | dimensionless |
+| effective carriage travel | 3.333333333 | mm/rev |
 | `lift_sign` | -1 | dimensionless |
-| motor speed | 360 | rpm |
-| linear velocity | 0.060 | m/s |
-| Ruckig acceleration | 0.10 | m/s^2 |
+| motor speed | 1440 | rpm |
+| linear velocity | 0.080 | m/s |
+| Ruckig acceleration | 0.033333333 | m/s^2 |
 | Ruckig jerk | 0.4 | m/s^3 |
 | default velocity scale | 0.80 | dimensionless |
-| hardware speed slope | 600 | rpm/s (0.10 m/s^2) |
+| hardware speed slope | 600 | rpm/s (0.033333333 m/s^2) |
 | Jog publish rate | 50 | Hz |
 | Jog keepalive timeout | 0.45 | s |
 
@@ -214,15 +218,15 @@ An absolute or relative command can be sent with:
 
 ```bash
 ros2 service call /joint/lift/command robot_control_msg/srv/SelectedJointControl \
-  "{joint_names: [joint_motor], values: [-0.050], relative: false, vel: 0.010, acc: 0.05}"
+  "{joint_names: [joint_motor], values: [-0.050], relative: false, vel: 0.010, acc: 0.02}"
 
 ros2 service call /joint/lift/command robot_control_msg/srv/SelectedJointControl \
-  "{joint_names: [joint_motor], values: [0.001], relative: true, vel: 0.005, acc: 0.05}"
+  "{joint_names: [joint_motor], values: [0.001], relative: true, vel: 0.005, acc: 0.02}"
 ```
 
 `vel` selects a per-command velocity scale but never exceeds the configured
-0.060 m/s mechanical limit. A positive `acc` can tighten, but never raise, the
-global 0.10 m/s^2 acceleration limit; jerk remains bounded by the controller
+0.080 m/s mechanical limit. A positive `acc` can tighten, but never raise, the
+global 0.033333333 m/s^2 acceleration limit; jerk remains bounded by the controller
 YAML. A `JointTrajectory` for `joint_motor` is accepted on
 `/joint/lift/trajectory`; streaming `JointTrajectoryPoint` targets use
 `/joint/lift/stream`. Do not publish directly to a forward command controller or

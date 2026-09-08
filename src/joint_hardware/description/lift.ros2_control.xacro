@@ -6,8 +6,8 @@
             slave_alias:=0 slave_position:=0 slave_vendor_id:=0 slave_product_code:=0
             ethercat_interface:=enp5s0 dc_assign_activate:=0 dc_sync0_shift_ns:=0
             command_units_per_rev:=10000 encoder_counts_per_rev:=131072
-            lead_mm_per_rev:=10.0 lift_sign:=-1.0 position_min_m:=-1.0
-            position_max_m:=0.0 max_rpm:=360 brake_control_enabled:=false
+            lead_mm_per_rev:=3.333333333 lift_sign:=-1.0 position_min_m:=-1.0
+            position_max_m:=0.0 max_rpm:=1440 brake_control_enabled:=false
             position_limit_recovery_max_rpm:=300
             limit_switch_enabled:=false limit_switch_positive_bit:=-1
             limit_switch_negative_bit:=-1 limit_switch_active_high:=true
@@ -37,14 +37,15 @@
         <param name="dc_assign_activate">${dc_assign_activate}</param>
         <param name="dc_sync0_shift_ns">${dc_sync0_shift_ns}</param>
         <param name="motor_id">LVM08008H3G3-M17</param>
-        <param name="lead_mm_per_rev">${lead_mm_per_rev}</param>
-        <param name="lift_sign">${lift_sign}</param>
+        <param name="lead_mm_per_rev">${lift_cfg['lead_mm_per_rev']}</param>
+        <param name="lift_sign">${lift_cfg['lift_sign']}</param>
         <param name="command_units_per_rev">${command_units_per_rev}</param>
         <param name="encoder_counts_per_rev">${encoder_counts_per_rev}</param>
-        <param name="position_min_m">${position_min_m}</param>
-        <param name="position_max_m">${position_max_m}</param>
-        <param name="max_rpm">${max_rpm}</param>
-        <param name="position_limit_recovery_max_rpm">${position_limit_recovery_max_rpm}</param>
+        <param name="position_min_m">${lift_cfg['position_min_m']}</param>
+        <param name="position_max_m">${lift_cfg['position_max_m']}</param>
+        <param name="reset_max_search_travel_m">${lift_cfg['reset_max_search_travel_m']}</param>
+        <param name="max_rpm">${lift_cfg['max_rpm']}</param>
+        <param name="position_limit_recovery_max_rpm">${lift_cfg['position_limit_recovery_max_rpm']}</param>
         <param name="brake_control_enabled">${brake_control_enabled}</param>
         <param name="limit_switch_enabled">${limit_switch_enabled}</param>
         <param name="limit_switch_positive_bit">${limit_switch_positive_bit}</param>
