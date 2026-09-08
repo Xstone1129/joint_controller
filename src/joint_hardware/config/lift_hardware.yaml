@@ -27,8 +27,8 @@ lead_mm_per_rev: 3.333333333
 lift_sign: -1.0
 command_units_per_rev: 10000
 encoder_counts_per_rev: 131072
-position_min_m: -1.0
-position_max_m: 0.0
+position_min_m: -1
+position_max_m: 0
 # Photoelectric homing is the only path allowed above position_max_m. Bound
 # that search relative to the position where reset starts, because the
 # pre-calibration boot coordinate may call any physical lift height zero.
@@ -57,7 +57,7 @@ lift_velocity_direct_stop_in_stop_window: false
 lift_stationary_velocity_threshold_mps: 0.001
 command_epsilon_m: 0.0005
 max_feedback_jump_m: 0.2
-max_feedback_velocity_mps: 0.080
+max_feedback_velocity_mps: 0.08
 feedback_velocity_tolerance_mps: 0.003
 lift_motion_command_period_ms: 10
 

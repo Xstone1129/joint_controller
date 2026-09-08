@@ -471,6 +471,23 @@ int main(int argc, char ** argv) {
       last_action = enable ? "holding current position" : "disabled at current position";
       return;
     }
+    if (verb == "STATE") {
+      if (!have_sample) {
+        std::cout << "LIFT_STATE available=0" << std::endl;
+        return;
+      }
+      const double position = position_units_to_m(input.actual_position_units, zero, units);
+      const double velocity = velocity_units_to_mps(input.actual_velocity_units_per_s, units);
+      std::cout << "LIFT_STATE available=1"
+                << " position_m=" << std::fixed << std::setprecision(9) << position
+                << " velocity_mps=" << velocity
+                << " pdo_fresh=" << (backend->pdo_fresh() ? 1 : 0)
+                << " link_state=" << link_state_name(backend->link_state())
+                << " status_word=" << input.status_word
+                << " error_code=" << input.error_code
+                << std::endl;
+      return;
+    }
     if (verb == "QUIT") { issue_key('q'); return; }
     if (verb == "MOVE_STEP") {
       double delta = 0.0;

@@ -482,6 +482,50 @@ class LiftWorker:
             self.proc.stdin.write(line.encode("ascii")); self.proc.stdin.flush()
         return {"accepted": True, "enabled": self.enabled, "backend": "real"}
 
+    @staticmethod
+    def _parse_state_line(line: str) -> dict[str, Any] | None:
+        if not line.startswith("LIFT_STATE "):
+            return None
+        fields: dict[str, str] = {}
+        for token in line.split()[1:]:
+            if "=" in token:
+                key, value = token.split("=", 1)
+                fields[key] = value
+        if fields.get("available") != "1":
+            return {"feedback_available": False}
+        try:
+            return {
+                "feedback_available": True,
+                "position_m": float(fields["position_m"]),
+                "velocity_mps": float(fields["velocity_mps"]),
+                "pdo_fresh": fields.get("pdo_fresh") == "1",
+                "link_state": fields.get("link_state", "unknown"),
+                "status_word": int(fields.get("status_word", "0"), 0),
+                "error_code": int(fields.get("error_code", "0"), 0),
+            }
+        except (KeyError, ValueError):
+            return {"feedback_available": False, "feedback_error": "invalid lift state response"}
+
+    def _read_state(self, timeout_s: float = 0.5) -> dict[str, Any]:
+        if self.proc is None or self.proc.stdin is None or self.proc.stdout is None:
+            return {"feedback_available": False, "feedback_error": "lift worker is not running"}
+        deadline = time.monotonic() + timeout_s
+        with self.lock:
+            self.proc.stdin.write(b"STATE\n")
+            self.proc.stdin.flush()
+            while time.monotonic() < deadline:
+                remaining = max(0.0, deadline - time.monotonic())
+                readable, _, _ = select.select([self.proc.stdout], [], [], remaining)
+                if not readable:
+                    break
+                line = self.proc.stdout.readline().decode("utf-8", errors="replace").strip()
+                parsed = self._parse_state_line(line)
+                if parsed is not None:
+                    return parsed
+                if self.proc.poll() is not None:
+                    break
+        return {"feedback_available": False, "feedback_error": "lift state response timed out"}
+
     def stop(self) -> None:
         if self.proc is None: return
         try:
@@ -494,4 +538,11 @@ class LiftWorker:
         self.enabled = False
 
     def state(self) -> dict[str, Any]:
-        return {"backend": "real", "enabled": self.enabled, "process_alive": self.proc is not None and self.proc.poll() is None}
+        process_alive = self.proc is not None and self.proc.poll() is None
+        feedback = self._read_state() if process_alive else {"feedback_available": False}
+        return {
+            "backend": "real",
+            "enabled": self.enabled,
+            "process_alive": process_alive,
+            **feedback,
+        }

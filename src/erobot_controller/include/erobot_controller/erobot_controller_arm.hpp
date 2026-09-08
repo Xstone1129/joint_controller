@@ -25,6 +25,7 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include <limits>
 #include "geometry_msgs/msg/twist.hpp"
 #include "std_msgs/msg/bool.hpp"
 #include "std_msgs/msg/int32.hpp"
@@ -140,8 +141,8 @@ protected:
   uint64_t consumed_heavy_command_generation_{0};
   uint64_t last_heavy_sequence_{0};
   bool heavy_lease_active_last_update_{false};
-  double heavy_max_velocity_{0.3};
-  double heavy_max_acceleration_{1.0};
+  double heavy_max_velocity_rad_s_{std::numeric_limits<double>::quiet_NaN()};
+  double heavy_max_acceleration_rad_s2_{std::numeric_limits<double>::quiet_NaN()};
   // This is set only by the managed SIM controller parameter file.  It never
   // changes arm power status and requires the lower gateway's active lease.
   bool allow_disabled_simulation_execution_{false};

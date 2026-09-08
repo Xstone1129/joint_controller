@@ -13,14 +13,14 @@
 /**/lift_controller:
   ros__parameters:
     joint: joint_motor
-    position_min_m: -1.0
-    position_max_m: 0.0
+    position_min_m: -1
+    position_max_m: 0
     # 1440 motor rpm with the 10 mm lead and 3:1 reduction is 0.080 m/s.
     # Keep the trajectory profile inside that mechanical limit.
-    max_velocity_mps: 0.080
+    max_velocity_mps: 0.08
     max_acceleration_mps2: 0.033333333
     max_jerk_mps3: 0.4
-    default_velocity_scale: 0.80
+    default_velocity_scale: 0.8
     jog_timeout_sec: 0.45
     brake_gate_stable_sec: 0.10
     driver_status_timeout_sec: 2.0

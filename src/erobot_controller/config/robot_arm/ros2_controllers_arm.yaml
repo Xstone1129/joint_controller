@@ -56,7 +56,7 @@
     heavy_v1:
       allow_disabled_simulation_execution: false
       max_velocity_rad_s: 0.3
-      max_acceleration_rad_s2: 1.0
+      max_acceleration_rad_s2: 1
 
     motor_coefficients:
       ljoint1:

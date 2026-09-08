@@ -15,18 +15,34 @@ joint_hardware::lift::LiftMotionProfile configured_profile()
 {
   joint_hardware::lift::LiftMotionProfile profile(0.01);
   joint_hardware::lift::LiftMotionLimits limits;
+  limits.min_position_m = -1.0;
+  limits.max_position_m = 0.0;
+  limits.max_velocity_mps = kMaxVelocityMps;
+  limits.max_acceleration_mps2 = kMaxAccelerationMps2;
+  limits.max_jerk_mps3 = 0.4;
+  limits.default_velocity_scale = 0.80;
   std::string error;
   EXPECT_TRUE(profile.configure(limits, error)) << error;
   profile.reset(0.0);
   return profile;
 }
 
-TEST(LiftMotionProfile, RejectsLimitsAboveMechanicalVelocity)
+TEST(LiftMotionProfile, RejectsMissingOrInvalidLimits)
 {
   joint_hardware::lift::LiftMotionProfile profile;
   joint_hardware::lift::LiftMotionLimits limits;
-  limits.max_velocity_mps = 0.081;
   std::string error;
+  EXPECT_FALSE(profile.configure(limits, error));
+
+  limits.min_position_m = -1.0;
+  limits.max_position_m = 0.0;
+  limits.max_velocity_mps = 0.080;
+  limits.max_acceleration_mps2 = 0.033333333;
+  limits.max_jerk_mps3 = 0.4;
+  limits.default_velocity_scale = 0.80;
+  EXPECT_TRUE(profile.configure(limits, error)) << error;
+
+  limits.max_velocity_mps = -0.001;
   EXPECT_FALSE(profile.configure(limits, error));
 }
 

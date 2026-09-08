@@ -2,6 +2,7 @@
 #define JOINT_HARDWARE__LIFT__LIFT_MOTION_PROFILE_HPP_
 
 #include <string>
+#include <limits>
 
 #include "ruckig/ruckig.hpp"
 
@@ -10,12 +11,12 @@ namespace joint_hardware::lift
 
 struct LiftMotionLimits
 {
-  double min_position_m{-1.0};
-  double max_position_m{0.0};
-  double max_velocity_mps{0.080};
-  double max_acceleration_mps2{0.033333333};
-  double max_jerk_mps3{0.4};
-  double default_velocity_scale{0.80};
+  double min_position_m{std::numeric_limits<double>::quiet_NaN()};
+  double max_position_m{std::numeric_limits<double>::quiet_NaN()};
+  double max_velocity_mps{std::numeric_limits<double>::quiet_NaN()};
+  double max_acceleration_mps2{std::numeric_limits<double>::quiet_NaN()};
+  double max_jerk_mps3{std::numeric_limits<double>::quiet_NaN()};
+  double default_velocity_scale{std::numeric_limits<double>::quiet_NaN()};
 };
 
 struct LiftMotionSample

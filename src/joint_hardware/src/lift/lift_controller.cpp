@@ -44,12 +44,12 @@ controller_interface::CallbackReturn LiftController::on_init()
 {
   try {
     auto_declare<std::string>("joint", "joint_motor");
-    auto_declare<double>("position_min_m", -1.0);
-    auto_declare<double>("position_max_m", 0.0);
-    auto_declare<double>("max_velocity_mps", 0.080);
-    auto_declare<double>("max_acceleration_mps2", 0.033333333);
-    auto_declare<double>("max_jerk_mps3", 0.4);
-    auto_declare<double>("default_velocity_scale", 0.80);
+    auto_declare<double>("position_min_m", std::numeric_limits<double>::quiet_NaN());
+    auto_declare<double>("position_max_m", std::numeric_limits<double>::quiet_NaN());
+    auto_declare<double>("max_velocity_mps", std::numeric_limits<double>::quiet_NaN());
+    auto_declare<double>("max_acceleration_mps2", std::numeric_limits<double>::quiet_NaN());
+    auto_declare<double>("max_jerk_mps3", std::numeric_limits<double>::quiet_NaN());
+    auto_declare<double>("default_velocity_scale", std::numeric_limits<double>::quiet_NaN());
     auto_declare<double>("jog_timeout_sec", 0.45);
     auto_declare<double>("brake_gate_stable_sec", 0.1);
     auto_declare<double>("driver_status_timeout_sec", 2.0);

@@ -16,7 +16,7 @@ import hardware_server  # noqa: E402
 from hardware_server import ServerState, build_tls_context  # noqa: E402
 from mode_guard import HardwareBusy, HardwareOwner  # noqa: E402
 from protocol import encode_frame, recv_frame  # noqa: E402
-from workers import ArmWorker, DesireRegion, RealRegion, WorkerError  # noqa: E402
+from workers import ArmWorker, DesireRegion, LiftWorker, RealRegion, WorkerError  # noqa: E402
 
 
 BASE_CONFIG = """
@@ -106,6 +106,25 @@ def test_console_lift_test_range_is_session_only(tmp_path: Path) -> None:
         assert state.config.snapshot()["config"]["lift"]["max_position_m"] == 0.0
     finally:
         state.stop()
+
+
+def test_lift_worker_parses_measured_state() -> None:
+    parsed = LiftWorker._parse_state_line(
+        "LIFT_STATE available=1 position_m=-0.123456789 velocity_mps=0.010000000 "
+        "pdo_fresh=1 link_state=operational status_word=39 error_code=0"
+    )
+    assert parsed == {
+        "feedback_available": True,
+        "position_m": -0.123456789,
+        "velocity_mps": 0.01,
+        "pdo_fresh": True,
+        "link_state": "operational",
+        "status_word": 39,
+        "error_code": 0,
+    }
+    assert LiftWorker._parse_state_line("LIFT_STATE available=0") == {
+        "feedback_available": False
+    }
 
 
 def test_console_lift_test_range_only_changes_runtime_worker_config(tmp_path: Path) -> None:

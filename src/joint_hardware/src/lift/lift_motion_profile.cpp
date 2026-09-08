@@ -20,10 +20,9 @@ bool LiftMotionProfile::configure(const LiftMotionLimits & limits, std::string &
     error = "position limits must be finite and ordered";
     return false;
   }
-  if (!std::isfinite(limits.max_velocity_mps) || limits.max_velocity_mps <= 0.0 ||
-    limits.max_velocity_mps > 0.080)
+  if (!std::isfinite(limits.max_velocity_mps) || limits.max_velocity_mps <= 0.0)
   {
-    error = "max velocity must be in (0, 0.080] m/s";
+    error = "max velocity must be finite and positive";
     return false;
   }
   if (!std::isfinite(limits.max_acceleration_mps2) || limits.max_acceleration_mps2 <= 0.0 ||

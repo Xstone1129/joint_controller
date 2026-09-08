@@ -36,6 +36,8 @@
   <xacro:arg name="use_persistent_zero_offset" default="false"/>
   <xacro:arg name="zero_offset_file" default="/tmp/joint_hardware_lift_zero_offset.cfg"/>
 
+  <xacro:property name="lift_cfg" value="${xacro.load_yaml('$(arg hardware_config_file)')}"/>
+
   <xacro:include filename="$(find joint_hardware)/description/lift.ros2_control.xacro"/>
   <xacro:joint_lift_ros2_control
     hardware_config_file="$(arg hardware_config_file)"
@@ -80,6 +82,10 @@
     <parent link="lift_base"/>
     <child link="lift_carriage"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-1.0" upper="0.0" velocity="0.080" effort="1000.0"/>
+    <limit
+      lower="${lift_cfg['position_min_m']}"
+      upper="${lift_cfg['position_max_m']}"
+      velocity="${lift_cfg['max_feedback_velocity_mps']}"
+      effort="1000.0"/>
   </joint>
 </robot>

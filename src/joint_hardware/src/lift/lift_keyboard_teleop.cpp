@@ -5,6 +5,7 @@
 #include <cstring>
 #include <fcntl.h>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <string>
 #include <stdexcept>
@@ -87,10 +88,14 @@ public:
   : Node("lift_keyboard_teleop")
   {
     joint_name_ = declare_parameter<std::string>("joint_name", "joint_motor");
-    speed_rpm_ = declare_parameter<double>("speed_rpm", 30.0);
-    lead_mm_per_rev_ = declare_parameter<double>("lead_mm_per_rev", 10.0 / 3.0);
-    position_min_m_ = declare_parameter<double>("position_min_m", -1.0);
-    position_max_m_ = declare_parameter<double>("position_max_m", 0.0);
+    speed_rpm_ = declare_parameter<double>(
+      "speed_rpm", std::numeric_limits<double>::quiet_NaN());
+    lead_mm_per_rev_ = declare_parameter<double>(
+      "lead_mm_per_rev", std::numeric_limits<double>::quiet_NaN());
+    position_min_m_ = declare_parameter<double>(
+      "position_min_m", std::numeric_limits<double>::quiet_NaN());
+    position_max_m_ = declare_parameter<double>(
+      "position_max_m", std::numeric_limits<double>::quiet_NaN());
     rate_hz_ = declare_parameter<double>("command_rate_hz", 50.0);
     // A terminal commonly waits several hundred milliseconds before it starts
     // repeating a held arrow key.  A shorter timeout turns a valid jog request
@@ -100,8 +105,8 @@ public:
     joint_state_topic_ = declare_parameter<std::string>(
       "joint_state_topic", "/lift/joint_states");
 
-    if (!std::isfinite(speed_rpm_) || speed_rpm_ <= 0.0 || speed_rpm_ > 1440.0) {
-      throw std::invalid_argument("speed_rpm must be in (0, 1440]");
+    if (!std::isfinite(speed_rpm_) || speed_rpm_ <= 0.0) {
+      throw std::invalid_argument("speed_rpm must be finite and positive");
     }
     if (!std::isfinite(lead_mm_per_rev_) || lead_mm_per_rev_ <= 0.0) {
       throw std::invalid_argument("lead_mm_per_rev must be positive");
@@ -368,11 +373,11 @@ private:
   }
 
   std::string joint_name_;
-  double speed_rpm_{30.0};
-  double lead_mm_per_rev_{10.0 / 3.0};
-  double speed_mps_{0.005};
-  double position_min_m_{-1.0};
-  double position_max_m_{0.0};
+  double speed_rpm_{std::numeric_limits<double>::quiet_NaN()};
+  double lead_mm_per_rev_{std::numeric_limits<double>::quiet_NaN()};
+  double speed_mps_{std::numeric_limits<double>::quiet_NaN()};
+  double position_min_m_{std::numeric_limits<double>::quiet_NaN()};
+  double position_max_m_{std::numeric_limits<double>::quiet_NaN()};
   double rate_hz_{50.0};
   int release_timeout_ms_{150};
   int arm_timeout_ms_{1000};
