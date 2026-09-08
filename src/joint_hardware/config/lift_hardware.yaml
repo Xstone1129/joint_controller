@@ -27,8 +27,8 @@ lead_mm_per_rev: 3.333333333
 lift_sign: -1.0
 command_units_per_rev: 10000
 encoder_counts_per_rev: 131072
-position_min_m: -1
-position_max_m: 0
+position_min_m: -1.0
+position_max_m: 0.0
 # Photoelectric homing is the only path allowed above position_max_m. Bound
 # that search relative to the position where reset starts, because the
 # pre-calibration boot coordinate may call any physical lift height zero.

@@ -11,6 +11,10 @@ unset FASTRTPS_DEFAULT_PROFILES_FILE
 unset FASTDDS_DEFAULT_PROFILES_FILE
 unset FASTDDS_BUILTIN_TRANSPORTS
 SIM="${SIM:-0.0}"
+STACK_LABEL="joint-controller-stack-real"
+if awk "BEGIN {exit !(${SIM} > 0.0)}"; then
+    STACK_LABEL="joint-controller-stack-sim"
+fi
 USE_RVIZ=${USE_RVIZ:-true}
 LIFT_ETHERCAT_INTERFACE=${LIFT_ETHERCAT_INTERFACE:-enp5s0}
 LIFT_BRAKE_CONTROL_ENABLED=${LIFT_BRAKE_CONTROL_ENABLED:-false}
@@ -25,7 +29,12 @@ fi
 RUN_USER=${SUDO_USER:-$(whoami)}
 RUN_HOME=$(getent passwd "${RUN_USER}" | cut -d: -f6)
 LIFT_ZERO_OFFSET_FILE=${LIFT_ZERO_OFFSET_FILE:-${RUN_HOME}/.local/state/joint_controller/lift_zero_offset.cfg}
-LOG_DIR="${WORKSPACE_ROOT}/log/runtime"
+LOG_ROOT="${WORKSPACE_ROOT}/log/runtime"
+timestamp=$(date '+%Y-%m-%d-%H-%M-%S')
+SESSION_LOG_DIR="${LOG_ROOT}/${timestamp}-${STACK_LABEL}"
+RUNTIME_LOG_DIR="${SESSION_LOG_DIR}/runtime"
+ROS_LOG_DIR="${SESSION_LOG_DIR}/ros"
+LOG_DIR="${RUNTIME_LOG_DIR}"
 IGH_DRIVER_BIN="${WORKSPACE_ROOT}/src/erobot_igh_driver/build/igh_driver"
 GRAPHICAL_DISPLAY=${DISPLAY:-}
 GRAPHICAL_XAUTHORITY=${XAUTHORITY:-}
@@ -63,8 +72,8 @@ resolve_graphical_session() {
 
 resolve_graphical_session
 
-mkdir -p "${LOG_DIR}"
-chown -R "${RUN_USER}:${RUN_USER}" "${LOG_DIR}"
+mkdir -p "${RUNTIME_LOG_DIR}" "${ROS_LOG_DIR}"
+chown -R "${RUN_USER}:${RUN_USER}" "${SESSION_LOG_DIR}"
 install -d -m 0700 -o "${RUN_USER}" -g "${RUN_USER}" "$(dirname -- "${LIFT_ZERO_OFFSET_FILE}")"
 
 run_as_user_bg() {
@@ -79,12 +88,14 @@ run_as_user_bg() {
             env ROS_DOMAIN_ID="${ROS_DOMAIN_ID}" ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY}" \
             RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION}" \
             CYCLONEDDS_URI="${CYCLONEDDS_URI}" \
+            ROS_LOG_DIR="${ROS_LOG_DIR}" \
             DISPLAY="${GRAPHICAL_DISPLAY}" XAUTHORITY="${GRAPHICAL_XAUTHORITY}" \
             bash -lc "unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE FASTDDS_BUILTIN_TRANSPORTS FASTDDS_DEFAULT_PROFILES_FILE; source ${WORKSPACE_ROOT}/install/setup.bash && exec ${command}" > "${log_file}" 2>&1 < /dev/null &
     else
         env ROS_DOMAIN_ID="${ROS_DOMAIN_ID}" ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY}" \
             RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION}" \
             CYCLONEDDS_URI="${CYCLONEDDS_URI}" \
+            ROS_LOG_DIR="${ROS_LOG_DIR}" \
             DISPLAY="${GRAPHICAL_DISPLAY}" XAUTHORITY="${GRAPHICAL_XAUTHORITY}" \
             bash -lc "unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE FASTDDS_BUILTIN_TRANSPORTS FASTDDS_DEFAULT_PROFILES_FILE; source ${WORKSPACE_ROOT}/install/setup.bash && exec ${command}" > "${log_file}" 2>&1 < /dev/null &
     fi
@@ -201,6 +212,7 @@ acquire_hardware_owner
 echo "============ 机器人启动脚本开始: ROS_DOMAIN_ID=${ROS_DOMAIN_ID}, ROS_LOCALHOST_ONLY=${ROS_LOCALHOST_ONLY}, RMW_IMPLEMENTATION=${RMW_IMPLEMENTATION}, CYCLONEDDS_URI=${CYCLONEDDS_URI} ============"
 echo "模式: sim=${SIM}, use_rviz=${USE_RVIZ}, enable_effort_mode_switch=${ENABLE_EFFORT_MODE_SWITCH}"
 echo "图形会话: DISPLAY=${GRAPHICAL_DISPLAY}, XAUTHORITY=${GRAPHICAL_XAUTHORITY}"
+echo "会话日志: ${SESSION_LOG_DIR}"
 date
 
 sleep 1

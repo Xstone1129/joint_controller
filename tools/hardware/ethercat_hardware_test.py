@@ -38,6 +38,10 @@ ARM_AXIS_NAMES = tuple(
 def allocate_driver_log(configured_path: str | Path) -> Path:
     """Create a unique per-run driver log path and update a latest pointer."""
     base = Path(str(configured_path))
+    log_root = os.environ.get("JOINT_CONTROLLER_LOG_ROOT", "").strip()
+    if log_root:
+        root = Path(log_root)
+        base = root / base.name
     stamp = time.strftime("%Y%m%d-%H%M%S")
     unique = base.with_name(f"{base.stem}-{stamp}-{os.getpid()}{base.suffix}")
     unique.parent.mkdir(parents=True, exist_ok=True)

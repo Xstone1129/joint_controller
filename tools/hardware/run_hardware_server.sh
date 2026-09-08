@@ -6,6 +6,27 @@ CONFIG="${HARDWARE_SERVER_CONFIG:-${SCRIPT_DIR}/hardware_io.yaml}"
 HOST="${HARDWARE_SERVER_HOST:-}"
 PORT="${HARDWARE_SERVER_PORT:-}"
 LOCK="${HARDWARE_SERVER_LOCK:-/run/lock/junior-hardware-owner.lock}"
+RUN_USER=${SUDO_USER:-user}
+LOG_ROOT="${SCRIPT_DIR}/../../log/runtime"
+timestamp=$(date '+%Y-%m-%d-%H-%M-%S')
+SESSION_NAME_FILE="${JOINT_CONTROLLER_SESSION_NAME_FILE:-/home/user/joint_controller/.junior_runtime_session_name}"
+SESSION_SUFFIX="${timestamp}-hardware-server"
+if [[ -r "${SESSION_NAME_FILE}" ]]; then
+  session_name=$(tr -d '[:space:]' < "${SESSION_NAME_FILE}")
+  if [[ -n "${session_name}" ]]; then
+    SESSION_SUFFIX="${session_name}"
+  fi
+fi
+SESSION_LOG_DIR="${LOG_ROOT}/${SESSION_SUFFIX}"
+RUNTIME_LOG_DIR="${SESSION_LOG_DIR}/runtime"
+CONSOLE_LOG="${SESSION_LOG_DIR}/console.log"
+mkdir -p "${RUNTIME_LOG_DIR}"
+chown -R "${RUN_USER}:${RUN_USER}" "${SESSION_LOG_DIR}" 2>/dev/null || true
+export JOINT_CONTROLLER_LOG_ROOT="${JOINT_CONTROLLER_LOG_ROOT:-${RUNTIME_LOG_DIR}}"
+exec > >(tee -a "${CONSOLE_LOG}") 2>&1
+
+echo "会话日志: ${SESSION_LOG_DIR}"
+echo "运行日志: ${RUNTIME_LOG_DIR}"
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
   echo "Usage: sudo $0 [--dry-run]"
