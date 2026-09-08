@@ -1,0 +1,8 @@
+<library path="robot_lower_backend_erobot">
+  <class
+    name="robot_lower_gateway/ErobotBackend"
+    type="robot_lower_gateway::ErobotBackend"
+    base_class_type="robot_lower_gateway::Backend">
+    <description>Normalizes feedback from the existing 14-axis erobot controller.</description>
+  </class>
+</library>

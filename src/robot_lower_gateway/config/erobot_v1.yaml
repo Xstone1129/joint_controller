@@ -1,0 +1,81 @@
+ubuntu_lower_gateway:
+  ros__parameters:
+    backend_plugin: robot_lower_gateway/ErobotBackend
+    publish_rate_hz: 20.0
+
+    # The gateway is feedback-only by default. Enable this only after the
+    # native Ubuntu control services have been verified in this workspace.
+    enable_command_proxy: false
+    command_proxy_prefix: "~/"
+
+    # These are existing service owners in the target robot workspace. The
+    # gateway forwards requests; it never writes a controller or PDO directly.
+    native_services:
+      power: /set_robot_power
+      mode: /set_arm_control_mode
+      joint_batch: /arm/joint_batch_control
+      joint_absolute: /arm_absolute_control
+      cartesian_increment: /cartesian_increment_control
+      cartesian_absolute: /cartesian_absolute_control
+
+    command_timeout_ms:
+      power: 30000
+      mode: 5000
+      joint: 30000
+      cartesian: 60000
+
+    canonical_joint_names:
+      - ljoint1
+      - ljoint2
+      - ljoint3
+      - ljoint4
+      - ljoint5
+      - ljoint6
+      - ljoint7
+      - rjoint1
+      - rjoint2
+      - rjoint3
+      - rjoint4
+      - rjoint5
+      - rjoint6
+      - rjoint7
+
+    # Native names may differ on another robot. Array order defines the mapping
+    # to canonical_joint_names above.
+    native_joint_names:
+      - ljoint1
+      - ljoint2
+      - ljoint3
+      - ljoint4
+      - ljoint5
+      - ljoint6
+      - ljoint7
+      - rjoint1
+      - rjoint2
+      - rjoint3
+      - rjoint4
+      - rjoint5
+      - rjoint6
+      - rjoint7
+
+    topics:
+      joint_state: /arm/joint_states
+      power_status: /arm/power_status
+      control_mode_status: /arm/control_mode_status
+      motion_status: /arm/arm_controller/motion_status
+      tcp_pose: /arm_tcp_pose
+      execution_status: /arm_cartesian_path_execution_status
+      workspace_status: /workspace/status
+
+    # Vendor-specific values stay in the adapter profile, not the gateway.
+    drive_status:
+      enabled_codes: [39]
+      unavailable_codes: [0]
+
+    stale_timeout_ms:
+      joint_state: 250
+      power_status: 500
+      control_mode: 500
+      motion_status: 500
+      tcp_pose: 500
+      execution: 3000

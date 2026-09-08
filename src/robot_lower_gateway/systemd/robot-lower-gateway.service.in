@@ -1,0 +1,19 @@
+[Unit]
+Description=Portable ROS 2 lower-machine feedback gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@ROBOT_USER@
+Group=@ROBOT_GROUP@
+WorkingDirectory=@GATEWAY_WORKSPACE@
+EnvironmentFile=-/etc/robot-lower-gateway/gateway.env
+ExecStart=@GATEWAY_RUNNER@
+Restart=on-failure
+RestartSec=2
+KillSignal=SIGINT
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target
