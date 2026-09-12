@@ -39,7 +39,10 @@ ethercat:
 
 arm:
   driver_binary: ../../build/erobot_igh_driver/igh_driver
-  driver_log: /tmp/heavy_v1_igh_driver.log
+  # The runtime entry points redirect this basename into
+  # ~/.ros/log/<session>/runtime.  Keep it as a basename so direct callers
+  # cannot accidentally create driver logs in /tmp.
+  driver_log: heavy_v1_igh_driver.log
   shared_memory:
     desire: Ethercat_axis_desire
     real: Ethercat_axis_real

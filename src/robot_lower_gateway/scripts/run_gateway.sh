@@ -37,6 +37,16 @@ source "${GATEWAY_OVERLAY_SETUP}"
 # ROS-generated setup scripts may inspect unset variables, so nounset is enabled
 # only after all underlays and overlays have been sourced.
 set -u
+source "/home/user/joint_controller/scripts/runtime_log_env.sh"
+
+# The gateway is a persistent systemd service started at boot, so a session
+# directory chosen by runtime_log_env.sh would be frozen at boot time and would
+# not match the current upper/lower runtime session.  Give its ROS logs one
+# stable, always-findable location instead so lease expiries and brake-lock
+# events are easy to locate during a live run.
+GATEWAY_LOG_ROOT="${JUNIOR_GATEWAY_LOG_ROOT:-${HOME}/.ros/log/gateway}"
+mkdir -p "${GATEWAY_LOG_ROOT}"
+export ROS_LOG_DIR="${GATEWAY_LOG_ROOT}"
 
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-55}"
 export ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY:-0}"

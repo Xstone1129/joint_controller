@@ -115,4 +115,41 @@ TEST_F(NativeServiceForwarderTest, NonrespondingServiceTimesOut)
   (void)service;
 }
 
+TEST_F(NativeServiceForwarderTest, RepeatedPowerOffRequestsRemainCallable)
+{
+  auto server_node = std::make_shared<rclcpp::Node>("forwarder_repeated_server");
+  auto client_node = std::make_shared<rclcpp::Node>("forwarder_repeated_client");
+  std::atomic<int> callback_count{0};
+  auto service = server_node->create_service<Service>(
+    "/test/native_repeated_power_off",
+    [&callback_count](const Service::Request::SharedPtr request,
+    Service::Response::SharedPtr response) {
+      EXPECT_FALSE(request->enable);
+      ++callback_count;
+      response->success = true;
+      response->message = "power off confirmed";
+    });
+  auto client = client_node->create_client<Service>("/test/native_repeated_power_off");
+  rclcpp::executors::MultiThreadedExecutor executor(rclcpp::ExecutorOptions(), 2);
+  executor.add_node(server_node);
+  executor.add_node(client_node);
+  std::thread spin_thread([&executor]() {executor.spin();});
+
+  for (int request_index = 0; request_index < 2; ++request_index) {
+    auto request = std::make_shared<Service::Request>();
+    request->enable = false;
+    std::string error;
+    const auto response = robot_lower_gateway::callNativeServiceBounded<Service>(
+      request, client, "/test/native_repeated_power_off", 2s, error);
+    ASSERT_NE(response, nullptr) << error;
+    EXPECT_TRUE(response->success);
+    EXPECT_EQ(response->message, "power off confirmed");
+  }
+
+  EXPECT_EQ(callback_count.load(), 2);
+  executor.cancel();
+  spin_thread.join();
+  (void)service;
+}
+
 }  // namespace

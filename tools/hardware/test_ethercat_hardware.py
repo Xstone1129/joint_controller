@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import ctypes
+import os
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -63,6 +65,61 @@ class EthercatHardwareConfigTest(unittest.TestCase):
     def test_arm_position_conversion_rejects_non_finite_values(self) -> None:
         with self.assertRaises(ValueError):
             console.arm_rad_to_units(float("nan"), 83443.0)
+
+    def test_driver_log_uses_active_runtime_root(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            runtime_root = Path(directory) / "runtime"
+            with mock.patch.dict(
+                os.environ,
+                {"JOINT_CONTROLLER_LOG_ROOT": str(runtime_root)},
+                clear=False,
+            ):
+                path = console.allocate_driver_log("/tmp/heavy_v1_igh_driver.log")
+            self.assertEqual(path.parent, runtime_root)
+            self.assertTrue(path.name.startswith("heavy_v1_igh_driver-"))
+            self.assertEqual(
+                (runtime_root / "heavy_v1_igh_driver.latest.log").resolve(), path
+            )
+
+    def test_driver_log_fallback_uses_marker_session(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "ros" / "log"
+            marker = Path(directory) / ".junior_runtime_session_name"
+            marker.write_text("2026-09-08-21-52-14-junior-runtime\n", encoding="utf-8")
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "JUNIOR_LOG_ROOT": str(root),
+                    "JUNIOR_RUNTIME_LOG_USER": "user",
+                    "JOINT_CONTROLLER_SESSION_NAME_FILE": str(marker),
+                },
+                clear=False,
+            ):
+                os.environ.pop("JOINT_CONTROLLER_LOG_ROOT", None)
+                path = console.allocate_driver_log("/tmp/heavy_v1_igh_driver.log")
+            self.assertEqual(
+                path.parent,
+                root / "2026-09-08-21-52-14-junior-runtime" / "runtime",
+            )
+
+    def test_driver_log_dynamic_server_refreshes_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "ros" / "log"
+            marker = Path(directory) / ".junior_runtime_session_name"
+            marker.write_text("new-runtime\n", encoding="utf-8")
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "JUNIOR_LOG_ROOT": str(root),
+                    "JOINT_CONTROLLER_LOG_ROOT": str(root / "old-runtime" / "runtime"),
+                    "JUNIOR_RUNTIME_LOG_DYNAMIC": "1",
+                    "JUNIOR_RUNTIME_LOG_USER": "user",
+                    "JOINT_CONTROLLER_SESSION_NAME_FILE": str(marker),
+                },
+                clear=False,
+            ):
+                path = console.allocate_driver_log("heavy_v1_igh_driver.log")
+            self.assertEqual(path.parent, root / "new-runtime" / "runtime")
 
     def test_lift_binding_uses_standalone_cli(self) -> None:
         lift = self.config["lift"]

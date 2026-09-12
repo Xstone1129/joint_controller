@@ -131,7 +131,6 @@ class ServerState:
                         runtime_config.setdefault("lift", {})["min_position_m"] = -1.0
                         runtime_config.setdefault("lift", {})["max_position_m"] = 1.0
                     self.workers = HardwareWorkers(runtime_config, self.config.path)
-                    self.workers.start()
             except Exception:
                 if self.workers is not None:
                     self.workers.stop()
@@ -169,14 +168,36 @@ class ServerState:
             return self.response(request, robot_id="heavy_v1", backend="real" if self.real_backend else "dry_run", config=self.config.snapshot(), capabilities=self.config.schema())
         if message_type == "GET_ARM_STATE":
             if self.workers is not None:
-                return self.response(request, **self.workers.arm.state())
+                self.workers.ensure_worker("arm")
+                if self.workers.arm is not None:
+                    return self.response(request, **self.workers.arm.state())
+                startup_state, startup_error = self.workers.startup_state("arm")
+                return self.response(
+                    request,
+                    backend="real",
+                    enabled=False,
+                    worker_state=startup_state,
+                    worker_error=startup_error,
+                    axes=[],
+                )
             return self.response(request, backend="dry_run", enabled=False, axes=[
                 {"joint": f"{side}joint{i}", "status": "DISABLED", "status_code": 0x40, "mode": 0, "error": 0, "position_rad": 0.0}
                 for side in ("l", "r") for i in range(1, 8)
             ])
         if message_type == "GET_LIFT_STATE":
             if self.workers is not None:
-                return self.response(request, **self.workers.lift.state())
+                self.workers.ensure_worker("lift")
+                if self.workers.lift is not None:
+                    return self.response(request, **self.workers.lift.state())
+                startup_state, startup_error = self.workers.startup_state("lift")
+                return self.response(
+                    request,
+                    backend="real",
+                    enabled=False,
+                    process_alive=False,
+                    worker_state=startup_state,
+                    worker_error=startup_error,
+                )
             return self.response(request, backend="dry_run", enabled=False, process_alive=False)
         if message_type == "ENTER_DIRECT":
             payload = request.get("payload", {})
@@ -203,7 +224,15 @@ class ServerState:
         if message_type in {"ARM_ENABLE", "ARM_DISABLE", "ARM_HOLD", "LIFT_ENABLE", "LIFT_DISABLE", "LIFT_HOLD", "LIFT_HOME", "LIFT_ZERO", "HOLD_ALL"}:
             with self.lock:
                 self.require_lease(session)
-            result = self.workers.command(message_type, request.get("payload", {})) if self.workers is not None else {"accepted": True, "backend": "dry_run"}
+            if self.workers is not None:
+                device = "arm" if message_type.startswith("ARM_") else "lift"
+                if message_type == "HOLD_ALL":
+                    result = self.workers.command(message_type, request.get("payload", {}))
+                else:
+                    self.workers.ensure_worker(device)
+                    result = self.workers.command(message_type, request.get("payload", {}))
+            else:
+                result = {"accepted": True, "backend": "dry_run"}
             return self.response(request, **result)
         if message_type in {"ARM_JOG", "ARM_HOME", "LIFT_JOG", "LIFT_HOME", "LIFT_ZERO"}:
             with self.lock:
@@ -215,7 +244,12 @@ class ServerState:
                 raise ConfigError("unknown arm joint")
             if message_type in {"ARM_JOG", "LIFT_JOG"} and payload.get("direction") not in (-1, 1):
                 raise ConfigError("direction must be -1 or 1")
-            result = self.workers.command(message_type, payload) if self.workers is not None else {"accepted": True, "backend": "dry_run"}
+            if self.workers is not None:
+                device = "arm" if message_type.startswith("ARM_") else "lift"
+                self.workers.ensure_worker(device)
+                result = self.workers.command(message_type, payload)
+            else:
+                result = {"accepted": True, "backend": "dry_run"}
             return self.response(request, **result)
         if message_type == "GET_CONFIG":
             return self.response(request, **self.config.snapshot())

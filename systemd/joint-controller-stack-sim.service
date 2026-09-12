@@ -13,6 +13,7 @@ User=user
 Group=user
 WorkingDirectory=/home/user/joint_controller
 Environment=ROS_DOMAIN_ID=2
+Environment=JUNIOR_RUNTIME_LOG_USER=user
 Environment=ROS_LOCALHOST_ONLY=0
 Environment=RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 Environment=CYCLONEDDS_URI=file:///home/user/joint_controller/cyclonedds.xml

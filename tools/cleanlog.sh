@@ -110,8 +110,9 @@ fi
 # it also keeps the directory harmless between builds.
 clear_directory "${WORKSPACE_LOG_DIR}" "COLCON_IGNORE"
 
-# ROS 2 defaults to $HOME/.ros/log when ROS_LOG_DIR is not set. Preserve the
-# .ros directory and any non-log configuration below it.
+# Lower runtime and hardware logs now live under the same per-session ROS root
+# as the ROS 2 logs. Preserve the .ros directory and any non-log configuration
+# below it.
 clear_directory "${ROS_LOG_DIR}"
 
 # CMake/CTest stores its per-package test output below build/*/Testing. Keep
@@ -132,8 +133,8 @@ for directory in \
     clear_directory "${directory}"
 done
 
-# The hardware console allocates timestamped logs from this configured base
-# name and maintains a .latest symlink. The lift CLI writes its trace here.
+# Remove legacy /tmp files left by versions before the per-session .ros/log
+# layout. New driver and lift traces are removed by clear_directory above.
 for path in /tmp/heavy_v1_igh_driver*.log /tmp/lift_ethercat_cli.csv; do
     [[ -e "${path}" || -L "${path}" ]] || continue
     remove_path "${path}"

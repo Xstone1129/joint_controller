@@ -12,6 +12,33 @@ for the right arm, and Master2=`enp5s0` for the lift. It then lets the operator
 select the interactive arm test or the lift CLI. `--check` is read-only and
 `--self-test` only validates the local YAML and shared-memory ABI.
 
+For the complete lower-computer discovery preflight covering only the two arms
+and the lift, run:
+
+```bash
+./tools/hardware/check_hardware_link.sh
+```
+
+It checks the configured Master0/1/2 interfaces, `/dev/EtherCAT0..2`,
+7/7/1 discovered slaves, and the lift vendor/product/PDO preflight. It does
+not inspect the base, waist, hands, sensors, or any other serial device, and
+it never enables drives or sends a control command. The default run temporarily
+brings up the three dedicated NICs and starts EtherLab only for discovery, then
+stops EtherLab and restores the NIC state. The complete mode requests sudo once
+when needed. Use `--report` to write the Markdown report elsewhere; use
+`--read-only` to skip the EtherLab start/stop phase.
+
+`--bring-up` is retained as an alias for the complete discovery mode. To run
+only the old interface-state check, use:
+
+```bash
+./tools/hardware/check_hardware_link.sh --read-only
+```
+
+The complete mode refuses to run when the EtherLab service/masters or
+`igh_driver` is already running, assigns no IP, creates no bridge, and restores
+each interface's original administrative state on exit or Ctrl-C.
+
 Select `arm` to start the legacy IGH driver without ROS. The first screen shows
 all 14 joints from top to bottom. Use Up/Down and Enter to select one joint.
 The control screen uses `E` to enable the arm drive group, `W`/`S` for slow
@@ -39,6 +66,6 @@ Files in this directory:
 - `hardware_io.yaml`: EtherCAT master and heavy_v1 binding configuration.
 - `test_ethercat_hardware.py`: offline tests for the binding and ABI.
 
-每次启动 `igh_driver` 都会写入独立日志，例如
-`/tmp/heavy_v1_igh_driver-20260903-110000-1234.log`；最近一次日志通过
-`/tmp/heavy_v1_igh_driver.latest.log` 查看，不会再把多次运行追加到同一个文件。
+每次启动 `igh_driver` 都会写入当前会话的
+`~/.ros/log/<runtime-id>/runtime/heavy_v1_igh_driver-*.log`；最近一次日志通过同目录的
+`heavy_v1_igh_driver.latest.log` 查看，不会再把多次运行追加到 `/tmp` 的同一个文件。

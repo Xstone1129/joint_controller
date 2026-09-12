@@ -1,8 +1,10 @@
 #ifndef JOINT_HARDWARE__LIFT_CONTROLLER_HPP_
 #define JOINT_HARDWARE__LIFT_CONTROLLER_HPP_
 
+#include <array>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -108,6 +110,31 @@ private:
   static const char * hold_failure_stage_name(HoldFailureStage stage) noexcept;
   bool driver_gate_ready() const noexcept;
   bool driver_status_fresh() const noexcept;
+  // Categorized diagnostics.  Every line carries a stable category tag so one
+  // session log can be filtered afterwards without re-running the motion:
+  //   [LIFT_FAULT] latched fault / latch cleared   ERROR (1 Hz heartbeat), WARN
+  //   [LIFT_GATE]  driver gate degraded / recovered DEBUG (1 Hz), promoted WARN
+  //   [LIFT_CMD]   rejected or ignored command     DEBUG (10 Hz max)
+  //   [LIFT_CFG]   configuration and lifecycle     INFO
+  // A latched fault re-enters the same branch on every 100 Hz cycle, so the
+  // detail string is built only when a line is really emitted; repeats inside
+  // one throttle window are counted instead of formatted.
+  std::string driver_gate_failure_reason() const;
+  bool driver_gate_expected() const noexcept;
+  bool lift_fault_line_due(const char * code) const noexcept;
+  void note_lift_fault_repeat(const char * code) noexcept;
+  void write_lift_fault(const char * code, const std::string & detail);
+  template<typename DetailBuilder>
+  void record_lift_fault(const char * code, DetailBuilder && build_detail)
+  {
+    if (!lift_fault_line_due(code)) {
+      note_lift_fault_repeat(code);
+      return;
+    }
+    write_lift_fault(code, build_detail());
+  }
+  void log_gate_diagnostics(const char * context);
+  void log_command_rejection(const char * category, const std::string & detail);
   void request_brake(bool enable);
   void on_driver_status(const std_msgs::msg::String & message);
   void publish_status();
@@ -140,6 +167,7 @@ private:
   std::atomic<uint64_t> safety_command_generation_{0};
   std::atomic<uint64_t> heavy_command_generation_{0};
   std::atomic<uint64_t> admitted_heavy_sequence_{0};
+  std::atomic<uint64_t> applied_heavy_sequence_{0};
   std::atomic<uint64_t> motion_generation_{0};
   std::atomic<uint64_t> cancellation_generation_{0};
   std::atomic<uint64_t> applied_cancellation_generation_{0};
@@ -202,6 +230,40 @@ private:
   std::atomic<int64_t> driver_status_ns_{0};
   std::atomic<bool> power_enable_requested_{false};
   std::atomic<bool> power_enabled_state_{false};
+
+  // Bounded fault history so a fault that already recovered is still visible
+  // after the fact. Fixed-size char buffers keep a record allocation-free; only
+  // an emitted fault line (at most once per second) formats strings. A latch
+  // that keeps re-entering the same branch inside one burst updates the newest
+  // record instead of evicting the rest of the history.
+  static constexpr std::size_t kFaultHistoryCapacity = 8;
+  static constexpr int64_t kFaultBurstWindowNs = 60000000000LL;    // 60 s
+  static constexpr int64_t kFaultLineThrottleNs = 1000000000LL;    // 1 s
+  static constexpr int64_t kGateDebugThrottleNs = 1000000000LL;    // 1 s
+  static constexpr int64_t kGateWarnWindowNs = 5000000000LL;       // 5 s
+  static constexpr int64_t kCommandDebugThrottleNs = 100000000LL;  // 100 ms
+  static constexpr double kGateWarnAfterSec = 2.0;
+  struct LiftFaultRecord
+  {
+    int64_t first_ns{0};
+    int64_t last_ns{0};
+    uint32_t repeats{0};
+    char code[40]{};
+    char detail[256]{};
+  };
+  std::array<LiftFaultRecord, kFaultHistoryCapacity> fault_history_{};
+  std::size_t fault_history_count_{0};
+  std::size_t fault_history_next_{0};
+  uint64_t fault_total_{0};
+  int64_t last_fault_record_ns_{0};
+  int64_t last_fault_line_ns_{0};
+  uint64_t fault_line_suppressed_{0};
+  char last_fault_code_[40]{};
+  int64_t last_gate_warn_ns_{0};
+  int64_t last_gate_debug_ns_{0};
+  int64_t gate_unready_since_ns_{0};
+  bool gate_warn_emitted_{false};
+  int64_t last_command_debug_ns_{0};
 
   std::size_t position_command_index_{0};
   std::size_t velocity_command_index_{1};

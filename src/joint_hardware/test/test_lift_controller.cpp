@@ -3,6 +3,7 @@
 #include <chrono>
 #include <atomic>
 #include <cmath>
+#include <initializer_list>
 #include <memory>
 #include <thread>
 #include <vector>
@@ -12,6 +13,7 @@
 #include "hardware_interface/loaned_state_interface.hpp"
 #include "joint_hardware/lift_controller.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "rcutils/logging.h"
 #include "robot_control_msg/msg/heavy_upper_body_gateway_command_v1.hpp"
 #include "std_msgs/msg/bool.hpp"
 #include "std_msgs/msg/float64.hpp"
@@ -29,6 +31,23 @@ void spin_delivery(rclcpp::executors::SingleThreadedExecutor & executor)
     executor.spin_some();
     std::this_thread::sleep_for(std::chrono::milliseconds(2));
   }
+}
+
+rclcpp::NodeOptions lift_test_options(
+  std::initializer_list<rclcpp::Parameter> overrides = {})
+{
+  std::vector<rclcpp::Parameter> parameters = {
+    rclcpp::Parameter("position_min_m", -1.0),
+    rclcpp::Parameter("position_max_m", 0.0),
+    rclcpp::Parameter("max_velocity_mps", 0.08),
+    rclcpp::Parameter("max_acceleration_mps2", 0.033333333),
+    rclcpp::Parameter("max_jerk_mps3", 0.4),
+    rclcpp::Parameter("default_velocity_scale", 0.8),
+  };
+  parameters.insert(parameters.end(), overrides.begin(), overrides.end());
+  rclcpp::NodeOptions options;
+  options.parameter_overrides(parameters);
+  return options;
 }
 
 class ExecutorThreadGuard
@@ -71,6 +90,45 @@ std_msgs::msg::String driver_status(
   return status;
 }
 
+// A partial driver status so a test can degrade exactly one CiA 402 sub
+// condition and read back which one the controller blamed.
+std_msgs::msg::String partial_driver_status(
+  bool feedback_fresh, const std::string & cia402_state, int mode_display,
+  bool ethercat_operational = true, bool working_counter_ok = true)
+{
+  std_msgs::msg::String status;
+  status.data =
+    std::string("{\"feedback_fresh\":") + (feedback_fresh ? "true" : "false") +
+    ",\"ethercat_operational\":" + (ethercat_operational ? "true" : "false") +
+    ",\"working_counter_ok\":" + (working_counter_ok ? "true" : "false") +
+    ",\"cia402_state\":\"" + cia402_state + "\"" +
+    ",\"brake_unlocked_inferred\":true,\"error_code\":0,\"mode_display\":" +
+    std::to_string(mode_display) +
+    ",\"motion_blocked\":false,\"quick_stop_active\":false,\"estop_latched\":false}";
+  return status;
+}
+
+std::size_t count_occurrences(const std::string & text, const std::string & needle)
+{
+  std::size_t count = 0;
+  for (std::size_t position = text.find(needle); position != std::string::npos;
+    position = text.find(needle, position + needle.size()))
+  {
+    ++count;
+  }
+  return count;
+}
+
+long long json_integer_field(const std::string & text, const std::string & key)
+{
+  const std::string marker = "\"" + key + "\":";
+  const std::size_t position = text.find(marker);
+  if (position == std::string::npos) {
+    return -1;
+  }
+  return std::stoll(text.substr(position + marker.size()));
+}
+
 trajectory_msgs::msg::JointTrajectory trajectory_to(double target)
 {
   trajectory_msgs::msg::JointTrajectory trajectory;
@@ -91,8 +149,7 @@ TEST(LiftController, SlowPositionCommandDoesNotTreatIntermediateSampleAsFinalTar
   rclcpp::init(argc, argv);
 
   auto controller = std::make_shared<joint_hardware::LiftController>();
-  rclcpp::NodeOptions options;
-  options.parameter_overrides(
+  auto options = lift_test_options(
     {
       rclcpp::Parameter("brake_gate_stable_sec", 0.1),
       rclcpp::Parameter("driver_status_timeout_sec", 2.0),
@@ -205,8 +262,7 @@ TEST(LiftController, BrakeGateAndEstopResetDoNotAdvanceOldTrajectory)
   rclcpp::init(argc, argv);
 
   auto controller = std::make_shared<joint_hardware::LiftController>();
-  rclcpp::NodeOptions options;
-  options.parameter_overrides(
+  auto options = lift_test_options(
     {
       rclcpp::Parameter("brake_gate_stable_sec", 0.1),
       rclcpp::Parameter("driver_status_timeout_sec", 2.0),
@@ -412,8 +468,9 @@ TEST(LiftController, HeavyLeaseArbitratesLegacyWriterAndKeepsSafetyStopAvailable
   rclcpp::init(argc, argv);
 
   auto controller = std::make_shared<joint_hardware::LiftController>();
+  auto options = lift_test_options();
   ASSERT_EQ(
-    controller->init("lift_heavy_arbiter_test", "", rclcpp::NodeOptions()),
+    controller->init("lift_heavy_arbiter_test", "", options),
     controller_interface::return_type::OK);
   ASSERT_EQ(
     controller->on_configure(rclcpp_lifecycle::State{}),
@@ -466,12 +523,15 @@ TEST(LiftController, HeavyLeaseArbitratesLegacyWriterAndKeepsSafetyStopAvailable
   auto status_publisher = io_node->create_publisher<std_msgs::msg::String>(
     "/joint/lift/driver_status", rclcpp::QoS(10));
   std::atomic<uint64_t> acknowledged_sequence{0};
+  std::atomic_uint acknowledged_count{0};
   auto ack_subscription = io_node->create_subscription<std_msgs::msg::UInt64>(
     "/ubuntu_lower_gateway/internal/heavy/v1/lift_applied_sequence",
     rclcpp::QoS(10).reliable(),
-    [&acknowledged_sequence](const std_msgs::msg::UInt64::SharedPtr message) {
+    [&acknowledged_sequence, &acknowledged_count](
+      const std_msgs::msg::UInt64::SharedPtr message) {
       if (message) {
         acknowledged_sequence.store(message->data);
+        acknowledged_count.fetch_add(1);
       }
     });
   auto legacy_client = io_node->create_client<robot_control_msg::srv::SelectedJointControl>(
@@ -514,6 +574,11 @@ TEST(LiftController, HeavyLeaseArbitratesLegacyWriterAndKeepsSafetyStopAvailable
   spin_delivery(executor);
   EXPECT_EQ(acknowledged_sequence.load(), 42U);
   EXPECT_DOUBLE_EQ(command_position, state_position);
+  const auto acknowledgements_before_retry = acknowledged_count.load();
+  heavy_publisher->publish(heavy);
+  spin_delivery(executor);
+  EXPECT_EQ(acknowledged_sequence.load(), 42U);
+  EXPECT_EQ(acknowledged_count.load(), acknowledgements_before_retry + 1U);
 
   auto stop = stop_client->async_send_request(std::make_shared<std_srvs::srv::Trigger::Request>());
   for (int cycle = 0; cycle < 20 &&
@@ -634,8 +699,7 @@ TEST(LiftController, HoldIsConfirmedAndKeepsServoEnabledUntilExplicitStop)
   rclcpp::init(argc, argv);
 
   auto controller = std::make_shared<joint_hardware::LiftController>();
-  rclcpp::NodeOptions options;
-  options.parameter_overrides(
+  auto options = lift_test_options(
     {
       rclcpp::Parameter("brake_gate_stable_sec", 0.1),
       rclcpp::Parameter("driver_status_timeout_sec", 5.0),
@@ -863,8 +927,9 @@ TEST(LiftController, HoldReportsDriverGateFailureInsteadOfFalseSuccess)
   char ** argv = nullptr;
   rclcpp::init(argc, argv);
   auto controller = std::make_shared<joint_hardware::LiftController>();
+  auto options = lift_test_options();
   ASSERT_EQ(
-    controller->init("lift_hold_failure_test", "", rclcpp::NodeOptions()),
+    controller->init("lift_hold_failure_test", "", options),
     controller_interface::return_type::OK);
   ASSERT_EQ(
     controller->on_configure(rclcpp_lifecycle::State{}),
@@ -943,6 +1008,492 @@ TEST(LiftController, HoldReportsDriverGateFailureInsteadOfFalseSuccess)
   executor.remove_node(controller->get_node()->get_node_base_interface());
   controller->release_interfaces();
   rclcpp::shutdown();
+}
+
+// ---------------------------------------------------------------------------
+// Categorized lift diagnostics tests.
+//
+// The controller categories are [LIFT_FAULT], [LIFT_GATE], [LIFT_CMD] and
+// [LIFT_CFG]. These tests have to prove two things that the original silent
+// Mode::fault entry points did not: a latched fault always produces a line at
+// ERROR, and a degraded driver gate is visible at DEBUG/WARN without latching a
+// fault. Both are observed through the ROS logging layer, i.e. the same path
+// that writes the session log under $ROS_LOG_DIR.
+// ---------------------------------------------------------------------------
+
+std::mutex g_log_mutex;
+std::string g_log_text;
+
+const char * severity_label(int severity)
+{
+  switch (severity) {
+    case RCUTILS_LOG_SEVERITY_DEBUG: return "DEBUG";
+    case RCUTILS_LOG_SEVERITY_INFO: return "INFO";
+    case RCUTILS_LOG_SEVERITY_WARN: return "WARN";
+    case RCUTILS_LOG_SEVERITY_ERROR: return "ERROR";
+    case RCUTILS_LOG_SEVERITY_FATAL: return "FATAL";
+    default: return "OTHER";
+  }
+}
+
+void capture_lift_log(
+  const rcutils_log_location_t *, int severity, const char * name,
+  rcutils_time_point_value_t, const char * format, va_list * args)
+{
+  if (args == nullptr) {
+    return;
+  }
+  char buffer[1024];
+  vsnprintf(buffer, sizeof(buffer), format, *args);
+  std::lock_guard<std::mutex> lock(g_log_mutex);
+  g_log_text += severity_label(severity);
+  g_log_text += '|';
+  g_log_text += name != nullptr ? name : "?";
+  g_log_text += "|";
+  g_log_text += buffer;
+  g_log_text += '\n';
+}
+
+class LogCapture
+{
+public:
+  LogCapture()
+  {
+    {
+      std::lock_guard<std::mutex> lock(g_log_mutex);
+      g_log_text.clear();
+    }
+    previous_handler_ = rcutils_logging_get_output_handler();
+    previous_level_ = rcutils_logging_get_default_logger_level();
+    rcutils_logging_set_output_handler(capture_lift_log);
+    // DEBUG lines are the per-cycle category detail, so the capture has to
+    // enable the same level an operator would use when investigating.
+    rcutils_logging_set_default_logger_level(RCUTILS_LOG_SEVERITY_DEBUG);
+  }
+
+  ~LogCapture()
+  {
+    rcutils_logging_set_output_handler(previous_handler_);
+    rcutils_logging_set_default_logger_level(previous_level_);
+  }
+
+  LogCapture(const LogCapture &) = delete;
+  LogCapture & operator=(const LogCapture &) = delete;
+
+  std::string text() const
+  {
+    std::lock_guard<std::mutex> lock(g_log_mutex);
+    return g_log_text;
+  }
+
+private:
+  rcutils_logging_output_handler_t previous_handler_{nullptr};
+  int previous_level_{RCUTILS_LOG_SEVERITY_INFO};
+};
+
+// RAII around the rclcpp context so a failure inside a test body cannot leave
+// the context initialized and cascade into every following test.
+class RclcppScope
+{
+public:
+  RclcppScope()
+  {
+    int argc = 0;
+    char ** argv = nullptr;
+    rclcpp::init(argc, argv);
+  }
+
+  ~RclcppScope()
+  {
+    rclcpp::shutdown();
+  }
+
+  RclcppScope(const RclcppScope &) = delete;
+  RclcppScope & operator=(const RclcppScope &) = delete;
+};
+
+// A configured, activated lift controller plus an IO node that publishes driver
+// status and records the control status JSON. The command/state interface
+// storage lives in this object, so build it directly inside a test body.
+struct LiftRig
+{
+  LiftRig(
+    const std::string & controller_name, const std::string & io_name,
+    std::initializer_list<rclcpp::Parameter> overrides)
+  : controller(std::make_shared<joint_hardware::LiftController>()),
+    io_node(std::make_shared<rclcpp::Node>(io_name))
+  {
+    ready = controller->init(controller_name, "", lift_test_options(overrides)) ==
+      controller_interface::return_type::OK;
+    if (!ready) {
+      return;
+    }
+    ready = controller->on_configure(rclcpp_lifecycle::State{}) ==
+      controller_interface::CallbackReturn::SUCCESS;
+    if (!ready) {
+      return;
+    }
+
+    // LoanedStateInterface/LoanedCommandInterface hold a REFERENCE to these
+    // handle objects, so they have to live as long as the controller borrows
+    // them. Keeping them in constructor locals would dangle as soon as the rig
+    // is built, which shows up as "value_ptr_ is null" in the first update().
+    position_command = std::make_unique<hardware_interface::CommandInterface>(
+      "joint_motor", "position", &command_position);
+    velocity_command = std::make_unique<hardware_interface::CommandInterface>(
+      "joint_motor", "velocity", &command_velocity);
+    acceleration_command = std::make_unique<hardware_interface::CommandInterface>(
+      "joint_motor", "acceleration", &command_acceleration);
+    power_enable_command = std::make_unique<hardware_interface::CommandInterface>(
+      "joint_motor", "power_enable", &command_power_enable);
+    position_state = std::make_unique<hardware_interface::StateInterface>(
+      "joint_motor", "position", &state_position);
+    velocity_state = std::make_unique<hardware_interface::StateInterface>(
+      "joint_motor", "velocity", &state_velocity);
+    power_enable_state = std::make_unique<hardware_interface::StateInterface>(
+      "joint_motor", "power_enable", &state_power_enable);
+    std::vector<hardware_interface::LoanedCommandInterface> commands;
+    commands.emplace_back(*position_command);
+    commands.emplace_back(*velocity_command);
+    commands.emplace_back(*acceleration_command);
+    commands.emplace_back(*power_enable_command);
+    std::vector<hardware_interface::LoanedStateInterface> states;
+    states.emplace_back(*position_state);
+    states.emplace_back(*velocity_state);
+    states.emplace_back(*power_enable_state);
+    controller->assign_interfaces(std::move(commands), std::move(states));
+    ready = controller->on_activate(rclcpp_lifecycle::State{}) ==
+      controller_interface::CallbackReturn::SUCCESS;
+    if (!ready) {
+      return;
+    }
+
+    status_publisher = io_node->create_publisher<std_msgs::msg::String>(
+      "/joint/lift/driver_status", rclcpp::QoS(10));
+    command_client = io_node->create_client<robot_control_msg::srv::SelectedJointControl>(
+      "/joint/lift/command");
+    status_subscription = io_node->create_subscription<std_msgs::msg::String>(
+      "/joint/lift/control_status", rclcpp::QoS(10).best_effort(),
+      [this](const std_msgs::msg::String::SharedPtr message) {
+        if (!message) {
+          return;
+        }
+        std::lock_guard<std::mutex> lock(status_mutex);
+        last_status = message->data;
+      });
+    executor.add_node(controller->get_node()->get_node_base_interface());
+    executor.add_node(io_node);
+    nodes_attached = true;
+    executor_thread = std::make_unique<ExecutorThreadGuard>(executor);
+    ready = command_client->wait_for_service(std::chrono::seconds(1));
+  }
+
+  ~LiftRig()
+  {
+    if (executor_thread) {
+      executor_thread->stop();
+    }
+    if (nodes_attached) {
+      executor.remove_node(io_node);
+      executor.remove_node(controller->get_node()->get_node_base_interface());
+    }
+    if (controller) {
+      controller->release_interfaces();
+    }
+  }
+
+  LiftRig(const LiftRig &) = delete;
+  LiftRig & operator=(const LiftRig &) = delete;
+
+  void run_cycle(int cycle)
+  {
+    EXPECT_EQ(
+      controller->update(
+        rclcpp::Time(static_cast<int64_t>(cycle) * 10'000'000LL, RCL_ROS_TIME),
+        rclcpp::Duration::from_nanoseconds(10'000'000)),
+      controller_interface::return_type::OK);
+    state_position = command_position;
+    state_velocity = command_velocity;
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+
+  void run_cycles(int first, int count)
+  {
+    for (int cycle = first; cycle < first + count; ++cycle) {
+      run_cycle(cycle);
+    }
+  }
+
+  std::string status_text()
+  {
+    std::lock_guard<std::mutex> lock(status_mutex);
+    return last_status;
+  }
+
+  bool send_position_command(double value, bool relative)
+  {
+    auto request = std::make_shared<robot_control_msg::srv::SelectedJointControl::Request>();
+    request->joint_names = {"joint_motor"};
+    request->values = {value};
+    request->relative = relative;
+    request->vel = 0.02;
+    request->acc = 0.05;
+    auto response = command_client->async_send_request(request);
+    if (response.wait_for(std::chrono::seconds(1)) != std::future_status::ready) {
+      return false;
+    }
+    return response.get()->accepted;
+  }
+
+  // Drives the controller into a non-HOLD motion mode and then breaks the
+  // driver gate, which is the path that used to enter Mode::fault silently.
+  bool enter_motion_and_lose_gate(int & cycle)
+  {
+    status_publisher->publish(driver_status(false));
+    run_cycles(cycle, 8);
+    cycle += 8;
+    if (!send_position_command(-0.40, false)) {
+      return false;
+    }
+    bool moving = false;
+    for (int step = 0; step < 60 && !moving; ++step) {
+      run_cycle(cycle++);
+      moving = command_velocity < -1.0e-4;
+    }
+    if (!moving) {
+      return false;
+    }
+    status_publisher->publish(partial_driver_status(false, "operation_enabled", 9));
+    run_cycles(cycle, 12);
+    cycle += 12;
+    return true;
+  }
+
+  // Declared first on purpose: members are destroyed in reverse declaration
+  // order, so the values the handles point at outlive the handles and the
+  // controller that borrows them.
+  double command_position{-0.10};
+  double command_velocity{0.0};
+  double command_acceleration{0.0};
+  double command_power_enable{0.0};
+  double state_position{-0.10};
+  double state_velocity{0.0};
+  double state_power_enable{1.0};
+
+  std::shared_ptr<joint_hardware::LiftController> controller;
+  std::shared_ptr<rclcpp::Node> io_node;
+  rclcpp::executors::SingleThreadedExecutor executor;
+  std::unique_ptr<ExecutorThreadGuard> executor_thread;
+  // The controller borrows these handles by reference, so they are kept alive
+  // for the whole lifetime of the rig.
+  std::unique_ptr<hardware_interface::CommandInterface> position_command;
+  std::unique_ptr<hardware_interface::CommandInterface> velocity_command;
+  std::unique_ptr<hardware_interface::CommandInterface> acceleration_command;
+  std::unique_ptr<hardware_interface::CommandInterface> power_enable_command;
+  std::unique_ptr<hardware_interface::StateInterface> position_state;
+  std::unique_ptr<hardware_interface::StateInterface> velocity_state;
+  std::unique_ptr<hardware_interface::StateInterface> power_enable_state;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_publisher;
+  rclcpp::Client<robot_control_msg::srv::SelectedJointControl>::SharedPtr command_client;
+  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr status_subscription;
+  std::mutex status_mutex;
+  std::string last_status;
+  bool nodes_attached{false};
+  bool ready{false};
+};
+
+// A driver gate that fails while the profile is moving used to latch
+// Mode::fault with no log line at all. It must now produce one categorized
+// ERROR record, keep it visible in the status JSON, and collapse the 100 Hz
+// re-entries into that single record instead of evicting the fault history.
+TEST(LiftController, GateLossDuringMotionLatchesFaultAndCountsRepeats)
+{
+  RclcppScope rclcpp_scope;
+  {
+    LiftRig rig(
+      "lift_gate_fault_test", "lift_gate_fault_test_io", {
+        rclcpp::Parameter("brake_gate_stable_sec", 0.1),
+        rclcpp::Parameter("driver_status_timeout_sec", 5.0),
+        rclcpp::Parameter("target_stable_sec", 5.0),
+        rclcpp::Parameter("goal_tolerance_m", 0.0001),
+        rclcpp::Parameter("stationary_velocity_mps", 0.001),
+      });
+    ASSERT_TRUE(rig.ready);
+
+    int cycle = 0;
+    ASSERT_TRUE(rig.enter_motion_and_lose_gate(cycle));
+    const std::string status = rig.status_text();
+
+    EXPECT_NE(status.find("\"mode\":\"fault\""), std::string::npos);
+    EXPECT_NE(status.find("gate_lost_during_motion"), std::string::npos);
+    EXPECT_NE(status.find("feedback_fresh=false"), std::string::npos);
+    EXPECT_NE(status.find("entry_mode="), std::string::npos);
+    EXPECT_GE(json_integer_field(status, "fault_total"), 1);
+    // The latch repeats every control cycle, but the history keeps one burst
+    // record whose repeat counter accounts for all of them.
+    EXPECT_EQ(count_occurrences(status, "\"code\":"), 1U);
+    EXPECT_EQ(
+      json_integer_field(status, "repeats"),
+      json_integer_field(status, "fault_total"));
+    EXPECT_DOUBLE_EQ(rig.command_power_enable, 0.0);
+  }
+}
+
+// A latched fault survives the driver gate recovering, which is exactly the
+// state that made the original field failure hard to interpret. The status
+// JSON must keep reporting the latch while also reporting a healthy gate.
+TEST(LiftController, LatchedFaultSurvivesGateRecoveryUntilReactivation)
+{
+  RclcppScope rclcpp_scope;
+  {
+    LiftRig rig(
+      "lift_fault_latch_test", "lift_fault_latch_test_io", {
+        rclcpp::Parameter("brake_gate_stable_sec", 0.1),
+        rclcpp::Parameter("driver_status_timeout_sec", 5.0),
+        rclcpp::Parameter("target_stable_sec", 5.0),
+        rclcpp::Parameter("goal_tolerance_m", 0.0001),
+        rclcpp::Parameter("stationary_velocity_mps", 0.001),
+      });
+    ASSERT_TRUE(rig.ready);
+
+    int cycle = 0;
+    ASSERT_TRUE(rig.enter_motion_and_lose_gate(cycle));
+    const auto latched_total = json_integer_field(rig.status_text(), "fault_total");
+    ASSERT_GE(latched_total, 1);
+
+    // The driver comes back: the gate closes again, the latch does not clear.
+    // Driver status delivery is asynchronous, so the counter is allowed to keep
+    // climbing until the healthy status has actually been consumed.
+    rig.status_publisher->publish(driver_status(false));
+    rig.run_cycles(cycle, 15);
+    cycle += 15;
+    const std::string recovered = rig.status_text();
+    EXPECT_NE(recovered.find("\"mode\":\"fault\""), std::string::npos);
+    EXPECT_NE(recovered.find("\"gate_ready\":true"), std::string::npos);
+    EXPECT_NE(recovered.find("\"gate_failure\":\"none\""), std::string::npos);
+    const auto settled_total = json_integer_field(recovered, "fault_total");
+    EXPECT_GE(settled_total, latched_total);
+
+    // Once the gate is healthy the fault branch stops re-entering, so the
+    // counter must freeze while the latched mode persists.
+    rig.run_cycles(cycle, 25);
+    cycle += 25;
+    const std::string still_latched = rig.status_text();
+    EXPECT_NE(still_latched.find("\"mode\":\"fault\""), std::string::npos);
+    EXPECT_EQ(json_integer_field(still_latched, "fault_total"), settled_total);
+
+    // Re-activation is the documented way out of the latch, and it must report
+    // the cleared latch while keeping the cumulative fault counter.
+    ASSERT_EQ(
+      rig.controller->on_deactivate(rclcpp_lifecycle::State{}),
+      controller_interface::CallbackReturn::SUCCESS);
+    ASSERT_EQ(
+      rig.controller->on_activate(rclcpp_lifecycle::State{}),
+      controller_interface::CallbackReturn::SUCCESS);
+    rig.run_cycles(cycle, 10);
+    const std::string reactivated = rig.status_text();
+    EXPECT_NE(reactivated.find("\"mode\":\"hold\""), std::string::npos);
+    EXPECT_EQ(json_integer_field(reactivated, "fault_total"), settled_total);
+    EXPECT_NE(reactivated.find("\"gate_failure\":\"none\""), std::string::npos);
+  }
+}
+
+// The fault entry points must emit at ERROR through the ROS logger, which is
+// the path that reaches the per-session $ROS_LOG_DIR file.
+TEST(LiftController, LatchedFaultEmitsCategorizedErrorLine)
+{
+  RclcppScope rclcpp_scope;
+  {
+    LogCapture capture;
+    LiftRig rig(
+      "lift_fault_log_test", "lift_fault_log_test_io", {
+        rclcpp::Parameter("brake_gate_stable_sec", 0.1),
+        rclcpp::Parameter("driver_status_timeout_sec", 5.0),
+        rclcpp::Parameter("target_stable_sec", 5.0),
+        rclcpp::Parameter("goal_tolerance_m", 0.0001),
+        rclcpp::Parameter("stationary_velocity_mps", 0.001),
+      });
+    ASSERT_TRUE(rig.ready);
+
+    int cycle = 0;
+    ASSERT_TRUE(rig.enter_motion_and_lose_gate(cycle));
+    const std::string log = capture.text();
+
+    EXPECT_NE(log.find("ERROR|"), std::string::npos);
+    EXPECT_NE(log.find("[LIFT_FAULT] state=latched code=gate_lost_during_motion"),
+      std::string::npos);
+    EXPECT_NE(log.find("gate[feedback_fresh=false]"), std::string::npos);
+    EXPECT_NE(log.find("[LIFT_CFG] configured unified lift controller"), std::string::npos);
+  }
+}
+
+// A degraded gate while the drive is enabled but the controller is not moving
+// must stay visible without latching a fault: DEBUG while it is degraded, one
+// WARN once it is sustained, one INFO when it recovers.
+TEST(LiftController, DegradedGateIsVisibleWithoutLatchingAFault)
+{
+  RclcppScope rclcpp_scope;
+  {
+    LogCapture capture;
+    LiftRig rig(
+      "lift_gate_visibility_test", "lift_gate_visibility_test_io", {
+        rclcpp::Parameter("brake_gate_stable_sec", 0.1),
+        rclcpp::Parameter("driver_status_timeout_sec", 5.0),
+      });
+    ASSERT_TRUE(rig.ready);
+
+    rig.status_publisher->publish(partial_driver_status(false, "operation_enabled", 9));
+    // Run past the 2 s promotion window so the WARN path is exercised.
+    for (int cycle = 0; cycle < 300; ++cycle) {
+      rig.run_cycle(cycle);
+    }
+    const std::string degraded_status = rig.status_text();
+    const std::string degraded_log = capture.text();
+
+    EXPECT_NE(degraded_status.find("\"mode\":\"hold\""), std::string::npos);
+    EXPECT_EQ(json_integer_field(degraded_status, "fault_total"), 0);
+    EXPECT_NE(degraded_status.find("\"gate_ready\":false"), std::string::npos);
+    EXPECT_NE(degraded_status.find("\"gate_failure\":\"feedback_fresh=false\""),
+      std::string::npos);
+    EXPECT_NE(degraded_log.find("DEBUG|"), std::string::npos);
+    EXPECT_NE(degraded_log.find("[LIFT_GATE]"), std::string::npos);
+    EXPECT_NE(degraded_log.find("state=unready"), std::string::npos);
+    EXPECT_NE(degraded_log.find("expected=true"), std::string::npos);
+    EXPECT_NE(degraded_log.find("WARN|"), std::string::npos);
+    EXPECT_NE(degraded_log.find("state=unready_sustained"), std::string::npos);
+
+    rig.status_publisher->publish(driver_status(false));
+    rig.run_cycles(300, 12);
+    const std::string recovered_log = capture.text();
+    EXPECT_NE(recovered_log.find("state=recovered"), std::string::npos);
+    EXPECT_EQ(json_integer_field(rig.status_text(), "fault_total"), 0);
+  }
+}
+
+// An idle, unpowered lift reports an unready gate by design. That must not
+// produce sustained WARN noise, otherwise the categorized log stops being
+// usable for real failures.
+TEST(LiftController, IdleUnpoweredHoldDoesNotFaultOrWarn)
+{
+  RclcppScope rclcpp_scope;
+  {
+    LogCapture capture;
+    LiftRig rig(
+      "lift_idle_diagnostics_test", "lift_idle_diagnostics_test_io", {
+        rclcpp::Parameter("brake_gate_stable_sec", 0.1),
+        rclcpp::Parameter("driver_status_timeout_sec", 5.0),
+      });
+    ASSERT_TRUE(rig.ready);
+    rig.state_power_enable = 0.0;
+
+    for (int cycle = 0; cycle < 300; ++cycle) {
+      rig.run_cycle(cycle);
+    }
+    const std::string status = rig.status_text();
+    EXPECT_NE(status.find("\"mode\":\"hold\""), std::string::npos);
+    EXPECT_EQ(json_integer_field(status, "fault_total"), 0);
+    EXPECT_EQ(capture.text().find("state=unready_sustained"), std::string::npos);
+  }
 }
 
 }  // namespace

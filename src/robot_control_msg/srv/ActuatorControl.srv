@@ -8,8 +8,8 @@ int32 actuator_id
 float64 yaw_angle
 float64 pitch_angle
 
-# 速度百分比 (0-100)
-int32 speed_pct
+# 速度百分比 (0.0-100.0)
+float64 speed_pct
 
 ---
 # 响应：操作结果

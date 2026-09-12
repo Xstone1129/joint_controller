@@ -3,11 +3,8 @@ set -Eeuo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 WORKSPACE_ROOT=$(cd -- "${SCRIPT_DIR}/../.." && pwd)
-timestamp=$(date '+%Y-%m-%d-%H-%M-%S')
-SESSION_LOG_DIR="${WORKSPACE_ROOT}/log/hardware/${timestamp}-hardware-console"
-SESSION_RUNTIME_LOG_DIR="${SESSION_LOG_DIR}/runtime"
-mkdir -p "${SESSION_RUNTIME_LOG_DIR}"
-export JOINT_CONTROLLER_LOG_ROOT="${SESSION_RUNTIME_LOG_DIR}"
+export JUNIOR_RUNTIME_LOG_USER="${JUNIOR_RUNTIME_LOG_USER:-${SUDO_USER:-user}}"
+source "${WORKSPACE_ROOT}/scripts/runtime_log_env.sh"
 exec > >(tee -a "${SESSION_LOG_DIR}/console.log") 2>&1
 TEST_TOOL="${SCRIPT_DIR}/ethercat_hardware_test.py"
 CONFIG="${SCRIPT_DIR}/hardware_io.yaml"

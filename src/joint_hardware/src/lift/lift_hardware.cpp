@@ -2333,6 +2333,10 @@ void LiftHardware::handle_brake_command(
     response->success = true;
     response->message =
       "controlled stop and brake lock requested; Quick Stop is sent on the next 10 ms cycle and LD3M-EC drives BR+/BR- automatically";
+    RCLCPP_WARN(
+      logger_,
+      "[LIFT_POWER] brake lock requested (drive disable): Quick Stop on next cycle; "
+      "service_disable_latched=true");
   } else {
     service_disable_latched_.store(false, std::memory_order_release);
     brake_stop_requested_.store(false, std::memory_order_release);
@@ -2340,6 +2344,9 @@ void LiftHardware::handle_brake_command(
     response->success = true;
     response->message =
       "Operation enabled requested; brake unlock and P04.38 release timing are checked before motion";
+    RCLCPP_INFO(
+      logger_,
+      "[LIFT_POWER] brake release requested (drive enable): service_disable_latched=false");
   }
 }
 

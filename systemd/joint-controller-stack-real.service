@@ -9,6 +9,7 @@ Conflicts=joint-controller-stack-sim.service joint-controller-stack.service robo
 # oneshot unit would remain active after the background driver had exited.
 Type=simple
 Environment=SUDO_USER=user
+Environment=JUNIOR_RUNTIME_LOG_USER=user
 Environment=ROS_DOMAIN_ID=2
 Environment=ROS_LOCALHOST_ONLY=0
 Environment=RMW_IMPLEMENTATION=rmw_cyclonedds_cpp

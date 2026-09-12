@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <sstream>
 #include <thread>
 
@@ -36,6 +37,38 @@ long json_integer(const std::string & text, const char * key, long fallback = 0)
 double duration_seconds(const builtin_interfaces::msg::Duration & duration)
 {
   return static_cast<double>(duration.sec) + static_cast<double>(duration.nanosec) * 1e-9;
+}
+
+// Diagnostics helpers. Fault details can contain commas and brackets, so they
+// must be quoted before they are embedded in the status JSON.
+std::string json_quote(const std::string & text)
+{
+  std::ostringstream quoted;
+  quoted << '"';
+  for (const char character : text) {
+    switch (character) {
+      case '"': quoted << "\\\""; break;
+      case '\\': quoted << "\\\\"; break;
+      case '\n': quoted << "\\n"; break;
+      case '\r': quoted << "\\r"; break;
+      case '\t': quoted << "\\t"; break;
+      default:
+        if (static_cast<unsigned char>(character) < 0x20U) {
+          quoted << ' ';
+        } else {
+          quoted << character;
+        }
+        break;
+    }
+  }
+  quoted << '"';
+  return quoted.str();
+}
+
+int64_t now_steady_ns()
+{
+  return std::chrono::duration_cast<std::chrono::nanoseconds>(
+    std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
 }  // namespace
@@ -258,13 +291,34 @@ controller_interface::CallbackReturn LiftController::on_configure(
         return;
       }
       uint64_t admitted = admitted_heavy_sequence_.load(std::memory_order_acquire);
-      if (message->sequence <= admitted ||
-        !admitted_heavy_sequence_.compare_exchange_strong(
-          admitted, message->sequence, std::memory_order_acq_rel))
+      while (message->sequence > admitted &&
+        !admitted_heavy_sequence_.compare_exchange_weak(
+          admitted, message->sequence, std::memory_order_acq_rel, std::memory_order_acquire))
       {
+      }
+      if (message->sequence <= admitted) {
+        if (message->sequence == applied_heavy_sequence_.load(std::memory_order_acquire) &&
+          heavy_ack_publisher_)
+        {
+          // The gateway may retransmit the current generation after an ACK
+          // delivery gap. Re-ACK only work RT has already applied.
+          std_msgs::msg::UInt64 ack;
+          ack.data = message->sequence;
+          heavy_ack_publisher_->publish(ack);
+          return;
+        }
         RCLCPP_WARN_THROTTLE(
           get_node()->get_logger(), *get_node()->get_clock(), 2000,
           "Ignored duplicate or out-of-order Heavy V1 lift sequence");
+        {
+          std::ostringstream detail;
+          detail << "received_sequence=" << message->sequence
+                 << " admitted_sequence=" << admitted_heavy_sequence_.load(
+            std::memory_order_acquire)
+                 << " applied_sequence=" << applied_heavy_sequence_.load(
+            std::memory_order_acquire);
+          log_command_rejection("heavy_sequence_duplicate_or_out_of_order", detail.str());
+        }
         return;
       }
       MotionCommand command;
@@ -287,6 +341,17 @@ controller_interface::CallbackReturn LiftController::on_configure(
         !std::isfinite(acceleration) || std::abs(acceleration) > limits_.max_acceleration_mps2)
         {
           RCLCPP_WARN(get_node()->get_logger(), "Rejected invalid Heavy V1 lift target");
+          std::ostringstream detail;
+          detail << "sequence=" << message->sequence
+                 << " field_mask=" << static_cast<unsigned int>(message->field_mask)
+                 << " position=" << message->position[0]
+                 << " velocity=" << velocity
+                 << " acceleration=" << acceleration
+                 << " limits[min_position_m=" << limits_.min_position_m
+                 << ",max_position_m=" << limits_.max_position_m
+                 << ",max_velocity_mps=" << limits_.max_velocity_mps
+                 << ",max_acceleration_mps2=" << limits_.max_acceleration_mps2 << ']';
+          log_command_rejection("heavy_target_out_of_limits", detail.str());
           return;
         }
         command.type = CommandType::stream;
@@ -337,6 +402,7 @@ controller_interface::CallbackReturn LiftController::on_configure(
           // granting a new lease, so an old high-water mark must not reject
           // the restarted gateway's generation 1 as out-of-order.
           admitted_heavy_sequence_.store(0, std::memory_order_release);
+          applied_heavy_sequence_.store(0, std::memory_order_release);
         }
       }
     });
@@ -424,9 +490,16 @@ controller_interface::CallbackReturn LiftController::on_configure(
   heavy_command_buffer_.writeFromNonRT(empty);
   RCLCPP_INFO(
     get_node()->get_logger(),
-    "Configured unified lift controller: v=%.3f m/s a=%.3f m/s^2 j=%.3f m/s^3 scale=%.2f",
+    "[LIFT_CFG] configured unified lift controller joint=%s "
+    "v=%.3f m/s a=%.3f m/s^2 j=%.3f m/s^3 scale=%.2f "
+    "travel=[%.3f,%.3f] m jog_timeout=%.3f s brake_gate_stable=%.3f s "
+    "driver_status_timeout=%.3f s goal_tolerance=%.4f m stationary_velocity=%.4f m/s",
+    joint_name_.c_str(),
     limits_.max_velocity_mps, limits_.max_acceleration_mps2,
-    limits_.max_jerk_mps3, limits_.default_velocity_scale);
+    limits_.max_jerk_mps3, limits_.default_velocity_scale,
+    limits_.min_position_m, limits_.max_position_m,
+    jog_timeout_sec_, brake_gate_stable_sec_, driver_status_timeout_sec_,
+    goal_tolerance_m_, stationary_velocity_mps_);
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
@@ -464,7 +537,28 @@ controller_interface::CallbackReturn LiftController::on_activate(
     active_trajectory_generation_ = 0;
   }
   gated_command_valid_ = false;
+  const auto previous_mode = static_cast<Mode>(mode_atomic_.load(std::memory_order_acquire));
   mode_ = Mode::hold;
+  // Re-activation is the only path out of a latched Mode::fault, so report the
+  // latch that this activation just cleared and re-arm the diagnostics window.
+  if (fault_total_ > 0U || previous_mode == Mode::fault) {
+    RCLCPP_WARN(
+      get_node()->get_logger(),
+      "[LIFT_FAULT] state=cleared_by_activate previous_mode=%s total_faults=%llu "
+      "last_code=%s last_fault_age_ms=%.1f",
+      mode_name(previous_mode), static_cast<unsigned long long>(fault_total_),
+      last_fault_code_[0] != '\0' ? last_fault_code_ : "none",
+      last_fault_line_ns_ > 0 ? static_cast<double>(now_steady_ns() - last_fault_line_ns_) * 1e-6 :
+      -1.0);
+  }
+  last_fault_line_ns_ = 0;
+  last_fault_record_ns_ = 0;
+  fault_line_suppressed_ = 0;
+  last_fault_code_[0] = '\0';
+  last_gate_debug_ns_ = 0;
+  last_gate_warn_ns_ = 0;
+  gate_unready_since_ns_ = 0;
+  gate_warn_emitted_ = false;
   soft_stop_completion_ = SoftStopCompletion::disable;
   pending_hold_generation_ = 0;
   cancellation_generation_.store(motion_generation_.load(), std::memory_order_release);
@@ -504,6 +598,14 @@ controller_interface::return_type LiftController::update(
   if (!std::isfinite(measured_position_m_) || !std::isfinite(measured_velocity_mps_) ||
     !std::isfinite(power_enabled))
   {
+    record_lift_fault("non_finite_state_interfaces", [this, power_enabled]() {
+      std::ostringstream detail;
+      detail << "entry_mode=" << mode_name(mode_)
+             << " position=" << measured_position_m_
+             << " velocity=" << measured_velocity_mps_
+             << " power_enable=" << power_enabled;
+      return detail.str();
+    });
     fail_pending_hold(HoldFailureStage::motion_profile);
     mode_ = Mode::fault;
     request_brake(false);
@@ -657,6 +759,16 @@ controller_interface::return_type LiftController::update(
       }
     } else if (command.type == CommandType::jog && mode_ == Mode::jog && driver_gate_ready()) {
       if (!profile_.set_velocity_target(command.velocity_mps, command.velocity_scale)) {
+        record_lift_fault("invalid_jog_velocity", [this, &command]() {
+          std::ostringstream detail;
+          detail << "entry_mode=" << mode_name(mode_)
+                 << " jog_velocity_mps=" << command.velocity_mps
+                 << " requested_velocity_scale=" << command.velocity_scale
+                 << " limits[max_velocity_mps=" << limits_.max_velocity_mps
+                 << ",max_acceleration_mps2=" << limits_.max_acceleration_mps2
+                 << ",max_jerk_mps3=" << limits_.max_jerk_mps3 << ']';
+          return detail.str();
+        });
         mode_ = Mode::fault;
         profile_.hold(measured_position_m_);
         request_brake(false);
@@ -684,6 +796,16 @@ controller_interface::return_type LiftController::update(
   if (mode_ != Mode::hold && mode_ != Mode::brake_gate && mode_ != Mode::estop &&
     !driver_gate_ready())
   {
+    record_lift_fault("gate_lost_during_motion", [this]() {
+      std::ostringstream detail;
+      detail << "entry_mode=" << mode_name(mode_)
+             << " position=" << measured_position_m_
+             << " velocity=" << measured_velocity_mps_
+             << " command_position=" << command_sample_.position_m
+             << " command_velocity=" << command_sample_.velocity_mps
+             << " gate[" << driver_gate_failure_reason() << ']';
+      return detail.str();
+    });
     fail_pending_hold(HoldFailureStage::driver_gate);
     mode_ = Mode::fault;
     gated_command_valid_ = false;
@@ -752,6 +874,21 @@ controller_interface::return_type LiftController::update(
   }
 
   if (!command_sample_.valid) {
+    record_lift_fault("ruckig_rejected_state", [this]() {
+      const auto last_sample = profile_.state();
+      std::ostringstream detail;
+      detail << "entry_mode=" << mode_name(mode_)
+             << " position=" << measured_position_m_
+             << " velocity=" << measured_velocity_mps_
+             << " profile_position=" << last_sample.position_m
+             << " profile_velocity=" << last_sample.velocity_mps
+             << " profile_acceleration=" << last_sample.acceleration_mps2
+             << " profile_jerk=" << last_sample.jerk_mps3
+             << " limits[max_velocity_mps=" << limits_.max_velocity_mps
+             << ",max_acceleration_mps2=" << limits_.max_acceleration_mps2
+             << ",max_jerk_mps3=" << limits_.max_jerk_mps3 << ']';
+      return detail.str();
+    });
     fail_pending_hold(HoldFailureStage::motion_profile);
     mode_ = Mode::fault;
     profile_.hold(measured_position_m_);
@@ -795,6 +932,11 @@ controller_interface::return_type LiftController::update(
     goal_stable_active_ = false;
   }
 
+  // Categorized gate diagnostics: DEBUG while the gate is degraded, promoted to
+  // one WARN per window once the failure is sustained, and one INFO on
+  // recovery. A latched fault is skipped here because the [LIFT_FAULT] record
+  // already carries the same breakdown.
+  log_gate_diagnostics("update");
   write_command_interfaces(command_sample_);
   confirm_pending_hold();
   if (heavy_command_consumed && heavy_command.heavy_sequence != 0) {
@@ -803,6 +945,7 @@ controller_interface::return_type LiftController::update(
     } else if (heavy_ack_publisher_) {
       std_msgs::msg::UInt64 ack;
       ack.data = heavy_command.heavy_sequence;
+      applied_heavy_sequence_.store(ack.data, std::memory_order_release);
       heavy_ack_publisher_->publish(ack);
     }
   }
@@ -811,6 +954,7 @@ controller_interface::return_type LiftController::update(
   {
     std_msgs::msg::UInt64 ack;
     ack.data = pending_heavy_follow_ack_sequence_;
+    applied_heavy_sequence_.store(ack.data, std::memory_order_release);
     heavy_ack_publisher_->publish(ack);
     pending_heavy_follow_ack_sequence_ = 0;
   }
@@ -1036,6 +1180,237 @@ bool LiftController::driver_gate_ready() const noexcept
          driver_mode_display_.load() == 9;
 }
 
+std::string LiftController::driver_gate_failure_reason() const
+{
+  // Report every failing sub-condition together with its measured value so a
+  // single log line identifies the cause without having to re-run the motion.
+  std::ostringstream reason;
+  bool first = true;
+  const auto note = [&reason, &first](const char * name, const std::string & value) {
+      if (!first) {
+        reason << ',';
+      }
+      first = false;
+      reason << name << '=' << value;
+    };
+  const int64_t stamp = driver_status_ns_.load(std::memory_order_relaxed);
+  const int64_t now = now_steady_ns();
+  if (stamp <= 0) {
+    note("driver_status", "never_received");
+  } else if (now >= stamp &&
+    static_cast<double>(now - stamp) * 1e-9 > driver_status_timeout_sec_)
+  {
+    note(
+      "driver_status_age_sec",
+      std::to_string(static_cast<double>(now - stamp) * 1e-9));
+  }
+  if (!driver_feedback_fresh_.load()) {
+    note("feedback_fresh", "false");
+  }
+  if (!driver_ethercat_operational_.load()) {
+    note("ethercat_operational", "false");
+  }
+  if (!driver_working_counter_ok_.load()) {
+    note("working_counter_ok", "false");
+  }
+  if (!power_enabled_state_.load()) {
+    note("power_enabled_state", "false");
+  }
+  if (!driver_operation_enabled_.load()) {
+    note("cia402_operation_enabled", "false");
+  }
+  if (driver_estop_latched_.load()) {
+    note("estop_latched", "true");
+  }
+  if (driver_error_code_.load() != 0) {
+    note("driver_error_code", std::to_string(driver_error_code_.load()));
+  }
+  if (driver_mode_display_.load() != 9) {
+    note("mode_display", std::to_string(static_cast<int>(driver_mode_display_.load())));
+  }
+  if (first) {
+    reason << "none";
+  }
+  return reason.str();
+}
+
+bool LiftController::lift_fault_line_due(const char * code) const noexcept
+{
+  const char * fault_code = code != nullptr ? code : "unknown";
+  if (last_fault_line_ns_ == 0) {
+    return true;
+  }
+  // A different fault is always reported, even inside the throttle window: the
+  // suppressed counter only covers repeats of the code already on the wire.
+  if (std::strcmp(last_fault_code_, fault_code) != 0) {
+    return true;
+  }
+  return now_steady_ns() - last_fault_line_ns_ >= kFaultLineThrottleNs;
+}
+
+void LiftController::note_lift_fault_repeat(const char * code) noexcept
+{
+  // Control-cycle bookkeeping for a fault that is already latched and already
+  // on the wire. It must stay allocation-free: this runs at 100 Hz for as long
+  // as the latch survives.
+  ++fault_total_;
+  ++fault_line_suppressed_;
+  if (fault_history_count_ == 0U) {
+    return;
+  }
+  LiftFaultRecord & newest =
+    fault_history_[(fault_history_next_ + kFaultHistoryCapacity - 1U) % kFaultHistoryCapacity];
+  if (code == nullptr || std::strcmp(newest.code, code) != 0) {
+    return;
+  }
+  newest.last_ns = now_steady_ns();
+  ++newest.repeats;
+}
+
+void LiftController::write_lift_fault(const char * code, const std::string & detail)
+{
+  const char * fault_code = code != nullptr ? code : "unknown";
+  const int64_t now_ns = now_steady_ns();
+  ++fault_total_;
+
+  LiftFaultRecord * newest = fault_history_count_ > 0U ?
+    &fault_history_[(fault_history_next_ + kFaultHistoryCapacity - 1U) % kFaultHistoryCapacity] :
+    nullptr;
+  const bool new_burst = newest == nullptr || last_fault_record_ns_ == 0 ||
+    std::strcmp(newest->code, fault_code) != 0 ||
+    now_ns - last_fault_record_ns_ >= kFaultBurstWindowNs;
+  if (new_burst) {
+    LiftFaultRecord & record = fault_history_[fault_history_next_];
+    record = LiftFaultRecord{};
+    record.first_ns = now_ns;
+    record.last_ns = now_ns;
+    record.repeats = 1U;
+    std::strncpy(record.code, fault_code, sizeof(record.code) - 1U);
+    record.code[sizeof(record.code) - 1U] = '\0';
+    std::strncpy(record.detail, detail.c_str(), sizeof(record.detail) - 1U);
+    record.detail[sizeof(record.detail) - 1U] = '\0';
+    fault_history_next_ = (fault_history_next_ + 1U) % kFaultHistoryCapacity;
+    if (fault_history_count_ < kFaultHistoryCapacity) {
+      ++fault_history_count_;
+    }
+  } else {
+    newest->last_ns = now_ns;
+    ++newest->repeats;
+    std::strncpy(newest->detail, detail.c_str(), sizeof(newest->detail) - 1U);
+    newest->detail[sizeof(newest->detail) - 1U] = '\0';
+  }
+  last_fault_record_ns_ = now_ns;
+
+  const LiftFaultRecord & current =
+    fault_history_[(fault_history_next_ + kFaultHistoryCapacity - 1U) % kFaultHistoryCapacity];
+  RCLCPP_ERROR(
+    get_node()->get_logger(),
+    "[LIFT_FAULT] state=latched code=%s mode=%s total=%llu repeats_burst=%u "
+    "suppressed_since_last=%llu detail=%s",
+    fault_code, mode_name(mode_), static_cast<unsigned long long>(fault_total_),
+    current.repeats, static_cast<unsigned long long>(fault_line_suppressed_), detail.c_str());
+  fault_line_suppressed_ = 0;
+  last_fault_line_ns_ = now_ns;
+  std::strncpy(last_fault_code_, fault_code, sizeof(last_fault_code_) - 1U);
+  last_fault_code_[sizeof(last_fault_code_) - 1U] = '\0';
+}
+
+bool LiftController::driver_gate_expected() const noexcept
+{
+  // The CiA 402 gate is only supposed to be ready while the drive is expected
+  // to be enabled. An idle, unpowered lift parked in HOLD reports an unready
+  // gate by design; warning about that would be pure noise.
+  return power_enable_requested_.load(std::memory_order_acquire) ||
+         power_enabled_state_.load(std::memory_order_acquire) ||
+         gated_command_valid_ ||
+         pending_hold_generation_ != 0 ||
+         (mode_ != Mode::hold && mode_ != Mode::estop);
+}
+
+void LiftController::log_gate_diagnostics(const char * context)
+{
+  const char * site = context != nullptr ? context : "update";
+  if (mode_ == Mode::fault) {
+    // The latched [LIFT_FAULT] record already owns the ERROR line for this
+    // condition; do not restate it once per control cycle.
+    gate_unready_since_ns_ = 0;
+    last_gate_debug_ns_ = 0;
+    last_gate_warn_ns_ = 0;
+    gate_warn_emitted_ = false;
+    return;
+  }
+  const int64_t now_ns = now_steady_ns();
+  if (driver_gate_ready()) {
+    if (gate_unready_since_ns_ == 0) {
+      return;
+    }
+    const double unready_sec = static_cast<double>(now_ns - gate_unready_since_ns_) * 1e-9;
+    if (gate_warn_emitted_) {
+      RCLCPP_INFO(
+        get_node()->get_logger(),
+        "[LIFT_GATE] context=%s state=recovered mode=%s unready_sec=%.3f",
+        site, mode_name(mode_), unready_sec);
+    } else {
+      RCLCPP_DEBUG(
+        get_node()->get_logger(),
+        "[LIFT_GATE] context=%s state=recovered mode=%s unready_sec=%.3f",
+        site, mode_name(mode_), unready_sec);
+    }
+    gate_unready_since_ns_ = 0;
+    last_gate_debug_ns_ = 0;
+    last_gate_warn_ns_ = 0;
+    gate_warn_emitted_ = false;
+    return;
+  }
+  if (gate_unready_since_ns_ == 0) {
+    gate_unready_since_ns_ = now_ns;
+  }
+  const double unready_sec = static_cast<double>(now_ns - gate_unready_since_ns_) * 1e-9;
+  const bool expected = driver_gate_expected();
+  if (last_gate_debug_ns_ == 0 || now_ns - last_gate_debug_ns_ >= kGateDebugThrottleNs) {
+    last_gate_debug_ns_ = now_ns;
+    RCLCPP_DEBUG(
+      get_node()->get_logger(),
+      "[LIFT_GATE] context=%s state=unready mode=%s expected=%s unready_sec=%.3f "
+      "power_requested=%s power_enabled=%s gate[%s]",
+      site, mode_name(mode_), expected ? "true" : "false", unready_sec,
+      power_enable_requested_.load() ? "true" : "false",
+      power_enabled_state_.load() ? "true" : "false",
+      driver_gate_failure_reason().c_str());
+  }
+  if (!expected || unready_sec < kGateWarnAfterSec) {
+    return;
+  }
+  if (last_gate_warn_ns_ != 0 && now_ns - last_gate_warn_ns_ < kGateWarnWindowNs) {
+    return;
+  }
+  last_gate_warn_ns_ = now_ns;
+  gate_warn_emitted_ = true;
+  RCLCPP_WARN(
+    get_node()->get_logger(),
+    "[LIFT_GATE] context=%s state=unready_sustained mode=%s unready_sec=%.3f "
+    "power_requested=%s power_enabled=%s gate[%s]",
+    site, mode_name(mode_), unready_sec,
+    power_enable_requested_.load() ? "true" : "false",
+    power_enabled_state_.load() ? "true" : "false",
+    driver_gate_failure_reason().c_str());
+}
+
+void LiftController::log_command_rejection(const char * category, const std::string & detail)
+{
+  const int64_t now_ns = now_steady_ns();
+  if (last_command_debug_ns_ != 0 &&
+    now_ns - last_command_debug_ns_ < kCommandDebugThrottleNs)
+  {
+    return;
+  }
+  last_command_debug_ns_ = now_ns;
+  RCLCPP_DEBUG(
+    get_node()->get_logger(),
+    "[LIFT_CMD] category=%s mode=%s %s",
+    category != nullptr ? category : "-", mode_name(mode_), detail.c_str());
+}
+
 void LiftController::request_brake(bool enable)
 {
   power_enable_requested_.store(enable, std::memory_order_release);
@@ -1090,7 +1465,34 @@ void LiftController::publish_status()
          << ",\"motion_generation\":" << motion_generation_.load()
          << ",\"cancellation_generation\":" << cancellation_generation_.load()
          << ",\"applied_cancellation_generation\":" <<
-    applied_cancellation_generation_.load() << "}";
+    applied_cancellation_generation_.load()
+         << ",\"gate_ready\":" << (driver_gate_ready() ? "true" : "false")
+         << ",\"gate_failure\":" << json_quote(
+    driver_gate_ready() ? std::string("none") : driver_gate_failure_reason())
+         << ",\"fault_total\":" << fault_total_
+         << ",\"fault_history\":[";
+  // Diagnostics only. The RT writer appends without a lock so a reader can
+  // briefly observe a half-written record; a garbled diagnostic string is
+  // preferable to blocking the 100 Hz control loop on a mutex.
+  const int64_t status_now_ns = now_steady_ns();
+  for (std::size_t offset = 0; offset < fault_history_count_; ++offset) {
+    const std::size_t index =
+      (fault_history_next_ + kFaultHistoryCapacity - 1U - offset) % kFaultHistoryCapacity;
+    const LiftFaultRecord & record = fault_history_[index];
+    if (offset != 0U) {
+      status << ',';
+    }
+    const double age_ms = record.first_ns > 0 && status_now_ns >= record.first_ns ?
+      static_cast<double>(status_now_ns - record.first_ns) * 1e-6 : -1.0;
+    const double last_age_ms = record.last_ns > 0 && status_now_ns >= record.last_ns ?
+      static_cast<double>(status_now_ns - record.last_ns) * 1e-6 : -1.0;
+    status << "{\"age_ms\":" << age_ms
+           << ",\"last_age_ms\":" << last_age_ms
+           << ",\"repeats\":" << record.repeats
+           << ",\"code\":" << json_quote(record.code)
+           << ",\"detail\":" << json_quote(record.detail) << '}';
+  }
+  status << "]}";
   message.data = status.str();
   status_publisher_->publish(message);
 }

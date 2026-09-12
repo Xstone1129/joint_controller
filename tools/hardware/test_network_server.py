@@ -16,7 +16,8 @@ import hardware_server  # noqa: E402
 from hardware_server import ServerState, build_tls_context  # noqa: E402
 from mode_guard import HardwareBusy, HardwareOwner  # noqa: E402
 from protocol import encode_frame, recv_frame  # noqa: E402
-from workers import ArmWorker, DesireRegion, LiftWorker, RealRegion, WorkerError  # noqa: E402
+import workers as workers_module  # noqa: E402
+from workers import ArmWorker, DesireRegion, HardwareWorkers, LiftWorker, RealRegion, WorkerError  # noqa: E402
 
 
 BASE_CONFIG = """
@@ -127,6 +128,83 @@ def test_lift_worker_parses_measured_state() -> None:
     }
 
 
+def test_lift_worker_startup_is_cancelled_when_direct_mode_releases(tmp_path: Path) -> None:
+    binary = tmp_path / "lift_cli"
+    binary.write_text("#!/bin/sh\n", encoding="ascii")
+    binary.chmod(0o755)
+    config_path = tmp_path / "hardware_io.yaml"
+    config_path.write_text(BASE_CONFIG, encoding="utf-8")
+    worker = LiftWorker(
+        {
+            "lift": {
+                "cli_binary": binary.name,
+                "interface": "enp5s0",
+                "master": 2,
+                "slave_alias": 0,
+                "slave_position": 0,
+                "min_position_m": -1.0,
+                "max_position_m": 0.0,
+                "zero_offset_file": "lift_zero.yaml",
+            }
+        },
+        config_path,
+    )
+    startup_waiting = threading.Event()
+    release_wait = threading.Event()
+
+    class FakeInput:
+        def write(self, _data):
+            return 0
+
+        def flush(self):
+            return None
+
+    class FakeProcess:
+        def __init__(self):
+            self.stdin = FakeInput()
+            self.stdout = object()
+            self.wait_calls = 0
+
+        def poll(self):
+            return None
+
+        def wait(self, timeout=None):
+            self.wait_calls += 1
+            return 0
+
+        def kill(self):
+            return None
+
+    process = FakeProcess()
+    errors: list[Exception] = []
+
+    def wait_for_cli(_read, _write, _error, _timeout):
+        startup_waiting.set()
+        release_wait.wait(timeout=1.0)
+        return [], [], []
+
+    def start() -> None:
+        try:
+            worker.start()
+        except Exception as exc:
+            errors.append(exc)
+
+    with mock.patch.object(workers_module.subprocess, "Popen", return_value=process), mock.patch.object(
+        workers_module.select, "select", side_effect=wait_for_cli
+    ):
+        thread = threading.Thread(target=start)
+        thread.start()
+        assert startup_waiting.wait(timeout=0.5)
+        worker.stop()
+        release_wait.set()
+        thread.join(timeout=1.0)
+
+    assert not thread.is_alive()
+    assert errors and "startup cancelled" in str(errors[0])
+    assert worker.proc is None
+    assert process.wait_calls >= 1
+
+
 def test_console_lift_test_range_only_changes_runtime_worker_config(tmp_path: Path) -> None:
     captured: dict[str, object] = {}
     config_path = tmp_path / "hardware_io.yaml"
@@ -136,9 +214,10 @@ def test_console_lift_test_range_only_changes_runtime_worker_config(tmp_path: Pa
         def __init__(self, config, config_path):
             captured["config"] = config
             captured["config_path"] = config_path
+            captured["started"] = False
 
         def start(self):
-            return None
+            captured["started"] = True
 
         def stop(self, **kwargs):
             return None
@@ -157,8 +236,66 @@ def test_console_lift_test_range_only_changes_runtime_worker_config(tmp_path: Pa
             assert runtime_config["lift"]["min_position_m"] == -1.0
             assert runtime_config["lift"]["max_position_m"] == 1.0
             assert state.config.snapshot()["config"]["lift"]["max_position_m"] == 0.0
+            assert captured["started"] is False
         finally:
             state.stop()
+
+
+def test_real_direct_state_starts_only_the_requested_worker(tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeWorkers:
+        def __init__(self, config, config_path):
+            self.arm = None
+            self.lift = None
+            self.requested: list[str] = []
+            captured["workers"] = self
+
+        def ensure_worker(self, device):
+            self.requested.append(device)
+
+        def startup_state(self, device):
+            return "starting", ""
+
+        def stop(self, **kwargs):
+            return None
+
+    config_path = tmp_path / "hardware_io.yaml"
+    config_path.write_text(BASE_CONFIG, encoding="utf-8")
+    with mock.patch.object(hardware_server, "HardwareWorkers", FakeWorkers):
+        state = ServerState(
+            ConfigStore(config_path),
+            tmp_path / "owner.lock",
+            real_backend=True,
+            activity_probe=AvailableProbe(),
+        )
+        try:
+            state.handle(request(1, "ENTER_DIRECT"))
+            arm = state.handle(request(2, "GET_ARM_STATE"))
+            assert arm["payload"]["worker_state"] == "starting"
+            assert captured["workers"].requested == ["arm"]
+        finally:
+            state.stop()
+
+
+def test_existing_ethercat_masters_are_not_claimed_for_cleanup(tmp_path: Path) -> None:
+    config = {
+        "ethercat": {
+            "init_script": "/etc/init.d/ethercat",
+            "masters": {
+                "left_arm": {"index": 0},
+                "right_arm": {"index": 1},
+                "lift": {"index": 2},
+            },
+        }
+    }
+    workers = HardwareWorkers(config, tmp_path / "hardware_io.yaml")
+    with mock.patch.object(workers_module.Path, "exists", return_value=True), mock.patch.object(
+        workers_module.subprocess, "run"
+    ) as run:
+        workers._ensure_ethercat()
+    run.assert_not_called()
+    assert workers.ethercat_started is False
 
 
 def test_server_rejects_second_direct_session(tmp_path: Path) -> None:

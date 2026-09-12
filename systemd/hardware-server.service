@@ -7,6 +7,7 @@ Wants=network-online.target
 Type=simple
 User=root
 WorkingDirectory=/home/user/joint_controller
+Environment=JUNIOR_RUNTIME_LOG_USER=user
 ExecStart=/home/user/joint_controller/tools/hardware/run_hardware_server.sh --real-backend
 ExecStopPost=/etc/init.d/ethercat stop
 Restart=on-failure

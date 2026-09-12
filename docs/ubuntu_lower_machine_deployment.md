@@ -426,10 +426,25 @@ cd /home/user/joint_controller
 sudo ./scripts/install_workspace_control_services.sh
 ```
 
+`install_workspace_control_services.sh` 也会安装非 ROS TCP hardware-server（远程硬件控制台）
+的 unit。若只需更新这个 unit（不重启其它服务），可单独执行；该命令不会启动服务：
+
+```bash
+sudo ./scripts/hardware_server_ctl.sh install
+```
+
+代码或日志环境更新后，须在确认机械臂安全、无控制任务的维护窗口内重启相应服务，已运行的
+进程不会自动重新加载脚本或 lift CLI：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart hardware-server.service
+```
+
 脚本会：
 
 1. 停用旧的 `robot.service`；
-2. 安装 supervisor、SIM、REAL 和 RViz unit；
+2. 安装 supervisor、TCP hardware-server、SIM、REAL 和 RViz unit；
 3. 禁止 SIM/REAL/RViz unit 开机自启；
 4. enable 并重启 supervisor；
 5. 执行 `systemctl daemon-reload`。
@@ -665,19 +680,30 @@ sudo journalctl -fu joint-controller-stack-real.service
 
 ### 11.2 运行日志
 
-REAL 启动脚本使用：
+REAL 启动脚本和上位机传下来的会话名共用下位机的 ROS 日志根目录。令
+`<runtime-id>` 为 `.junior_runtime_session_name` 中的值（例如
+`2026-09-08-21-52-14-junior-runtime`）：
 
 ```text
-/home/user/joint_controller/log/runtime/igh_driver.log
-/home/user/joint_controller/log/runtime/robot_arm.log
-/home/user/joint_controller/log/runtime/robot_srv.log
+/home/user/.ros/log/<runtime-id>/runtime/igh_driver.log
+/home/user/.ros/log/<runtime-id>/runtime/robot_arm.log
+/home/user/.ros/log/<runtime-id>/runtime/lift_controller.log
+/home/user/.ros/log/<runtime-id>/runtime/robot_srv.log
+/home/user/.ros/log/<runtime-id>/ros/
 ```
 
 ```bash
-tail -100 /home/user/joint_controller/log/runtime/igh_driver.log
-tail -100 /home/user/joint_controller/log/runtime/robot_arm.log
-tail -100 /home/user/joint_controller/log/runtime/robot_srv.log
+tail -100 /home/user/.ros/log/<runtime-id>/runtime/igh_driver.log
+tail -100 /home/user/.ros/log/<runtime-id>/runtime/robot_arm.log
+tail -100 /home/user/.ros/log/<runtime-id>/runtime/robot_srv.log
 ```
+
+独立 TCP hardware-server、ROS-free 硬件控制台和 lift CLI 也使用同一布局；
+IGH 实例日志位于 `<runtime-id>/runtime/heavy_v1_igh_driver-*.log`，控制台输出位于
+`<runtime-id>/console.log`。如果没有上位机会话标记，工具使用
+`standalone-hardware` 会话名。TCP hardware-server 常驻时，IGH/lift worker 每次启动都会
+重新读取 marker，因此上位机开始新 runtime 后仍会切换到新的 `<runtime-id>`。旧版本遗留的
+`joint_controller/log/runtime` 和 `/tmp` 文件不再是当前输出位置。
 
 ### 11.3 常见问题
 

@@ -2,6 +2,7 @@
 set -eo pipefail
 
 WORKSPACE_ROOT=/home/user/joint_controller
+source "${WORKSPACE_ROOT}/scripts/runtime_log_env.sh"
 
 source /opt/ros/humble/setup.bash
 source "${WORKSPACE_ROOT}/install/setup.bash"

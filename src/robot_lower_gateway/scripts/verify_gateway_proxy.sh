@@ -27,6 +27,11 @@ declare -a SERVICES=(
   "joint_absolute_control|robot_control_msg/srv/JointAbsoluteControl"
   "cartesian_increment_control|robot_control_msg/srv/CartesianIncrementControl"
   "cartesian_absolute_control|robot_control_msg/srv/CartesianAbsoluteControl"
+  "lift/set_power|std_srvs/srv/SetBool"
+  "lift/command|robot_control_msg/srv/SelectedJointControl"
+  "lift/stop|std_srvs/srv/Trigger"
+  "lift/hold|std_srvs/srv/Trigger"
+  "lift/set_drive_zero|std_srvs/srv/Trigger"
 )
 
 echo "Checking gateway proxy under ${PREFIX}"
@@ -42,6 +47,24 @@ for entry in "${SERVICES[@]}"; do
   else
     printf 'FAIL %-58s expected %s (got %s)\n' \
       "${service}" "${expected_type}" "${actual_type:-missing}"
+    failed=1
+  fi
+done
+
+declare -a TOPICS=(
+  "lift/status|robot_control_msg/msg/LiftStatus"
+  "lift/joint_states|sensor_msgs/msg/JointState"
+)
+for entry in "${TOPICS[@]}"; do
+  IFS='|' read -r name expected_type <<<"${entry}"
+  topic="${PREFIX}/${name}"
+  actual_type=""
+  if actual_type="$(ros2 topic type "${topic}" 2>/dev/null)" &&
+    [[ "${actual_type}" == "${expected_type}" ]]; then
+    printf 'OK   %-58s %s\n' "${topic}" "${actual_type}"
+  else
+    printf 'FAIL %-58s expected %s (got %s)\n' \
+      "${topic}" "${expected_type}" "${actual_type:-missing}"
     failed=1
   fi
 done

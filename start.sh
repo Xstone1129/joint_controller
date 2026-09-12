@@ -29,11 +29,7 @@ fi
 RUN_USER=${SUDO_USER:-$(whoami)}
 RUN_HOME=$(getent passwd "${RUN_USER}" | cut -d: -f6)
 LIFT_ZERO_OFFSET_FILE=${LIFT_ZERO_OFFSET_FILE:-${RUN_HOME}/.local/state/joint_controller/lift_zero_offset.cfg}
-LOG_ROOT="${WORKSPACE_ROOT}/log/runtime"
-timestamp=$(date '+%Y-%m-%d-%H-%M-%S')
-SESSION_LOG_DIR="${LOG_ROOT}/${timestamp}-${STACK_LABEL}"
-RUNTIME_LOG_DIR="${SESSION_LOG_DIR}/runtime"
-ROS_LOG_DIR="${SESSION_LOG_DIR}/ros"
+source "${WORKSPACE_ROOT}/scripts/runtime_log_env.sh"
 LOG_DIR="${RUNTIME_LOG_DIR}"
 IGH_DRIVER_BIN="${WORKSPACE_ROOT}/src/erobot_igh_driver/build/igh_driver"
 GRAPHICAL_DISPLAY=${DISPLAY:-}
@@ -76,10 +72,30 @@ mkdir -p "${RUNTIME_LOG_DIR}" "${ROS_LOG_DIR}"
 chown -R "${RUN_USER}:${RUN_USER}" "${SESSION_LOG_DIR}"
 install -d -m 0700 -o "${RUN_USER}" -g "${RUN_USER}" "$(dirname -- "${LIFT_ZERO_OFFSET_FILE}")"
 
+# Mirror the upper-computer session layout so both computers can be read the
+# same way: a top-level console log and startup-diagnostic log, plus one
+# directory per subsystem (arm/lift/robot_control/hardware/gateway) instead of
+# one flat ros/ tree holding every node log under an opaque pid/timestamp name.
+: >> "${CONSOLE_LOG}"
+: >> "${STARTUP_DIAGNOSTIC_LOG}"
+chown "${RUN_USER}:${RUN_USER}" "${CONSOLE_LOG}" "${STARTUP_DIAGNOSTIC_LOG}" 2>/dev/null || true
+exec > >(tee -a "${CONSOLE_LOG}") 2>&1
+
+log_startup_diagnostic() {
+    local message=${1:-}
+    [ -n "${message}" ] || return 0
+    printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "${message}" >> "${STARTUP_DIAGNOSTIC_LOG}" || true
+    printf '%s\n' "${message}"
+}
+
 run_as_user_bg() {
     local command="$1"
     local log_file="$2"
     local label="$3"
+    # Optional subsystem-specific ROS_LOG_DIR.  Passing it keeps each
+    # subsystem's ROS node logs in its own session subdirectory instead of
+    # merging every node into <session>/ros.
+    local ros_log_dir="${4:-${ROS_LOG_DIR}}"
 
     # Keep every child in the service cgroup. sudo+setsid previously allowed
     # ROS launch processes to survive after the REAL systemd unit stopped.
@@ -88,14 +104,14 @@ run_as_user_bg() {
             env ROS_DOMAIN_ID="${ROS_DOMAIN_ID}" ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY}" \
             RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION}" \
             CYCLONEDDS_URI="${CYCLONEDDS_URI}" \
-            ROS_LOG_DIR="${ROS_LOG_DIR}" \
+            ROS_LOG_DIR="${ros_log_dir}" \
             DISPLAY="${GRAPHICAL_DISPLAY}" XAUTHORITY="${GRAPHICAL_XAUTHORITY}" \
             bash -lc "unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE FASTDDS_BUILTIN_TRANSPORTS FASTDDS_DEFAULT_PROFILES_FILE; source ${WORKSPACE_ROOT}/install/setup.bash && exec ${command}" > "${log_file}" 2>&1 < /dev/null &
     else
         env ROS_DOMAIN_ID="${ROS_DOMAIN_ID}" ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY}" \
             RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION}" \
             CYCLONEDDS_URI="${CYCLONEDDS_URI}" \
-            ROS_LOG_DIR="${ROS_LOG_DIR}" \
+            ROS_LOG_DIR="${ros_log_dir}" \
             DISPLAY="${GRAPHICAL_DISPLAY}" XAUTHORITY="${GRAPHICAL_XAUTHORITY}" \
             bash -lc "unset ROS_DISCOVERY_SERVER FASTRTPS_DEFAULT_PROFILES_FILE FASTDDS_BUILTIN_TRANSPORTS FASTDDS_DEFAULT_PROFILES_FILE; source ${WORKSPACE_ROOT}/install/setup.bash && exec ${command}" > "${log_file}" 2>&1 < /dev/null &
     fi
@@ -319,7 +335,8 @@ else
         exit 1
     fi
     # Keep the CiA402 transition/error log; it is required to diagnose 0x603F faults.
-    "${IGH_DRIVER_BIN}" \
+    log_startup_diagnostic "Starting IGH EtherCAT driver (hardware log dir: ${HARDWARE_LOG_DIR})."
+    ROS_LOG_DIR="${HARDWARE_LOG_DIR}" "${IGH_DRIVER_BIN}" \
         > "${LOG_DIR}/igh_driver.log" 2>&1 < /dev/null &
     IGH_PID=$!
     printf '%s\n' "${IGH_PID}" > /var/run/igh_driver.pid
@@ -346,27 +363,34 @@ else
 fi
 
 echo "启动 arm 节点..."
+log_startup_diagnostic "Starting arm controller launch (ROS log dir: ${ARM_LOG_DIR})."
 run_as_user_bg \
     "ros2 launch erobot_controller load_controller_arm.launch.py sim:=${SIM} use_rviz:=${USE_RVIZ} enable_effort_mode_switch:=${ENABLE_EFFORT_MODE_SWITCH}" \
     "${LOG_DIR}/robot_arm.log" \
-    "arm controller launch"
+    "arm controller launch" \
+    "${ARM_LOG_DIR}"
 sleep 2
 
 if ! awk "BEGIN {exit !(${SIM} > 0.0)}"; then
     echo "启动 lift EtherCAT 控制器（保持失能）..."
+    log_startup_diagnostic "Starting lift EtherCAT controller launch (ROS log dir: ${LIFT_LOG_DIR})."
     run_as_user_bg \
         "ros2 launch joint_hardware lift_ethercat.launch.py backend:=etherlab namespace:=lift master_index:=2 slave_alias:=0 slave_position:=0 slave_vendor_id:=${LIFT_VENDOR_ID} slave_product_code:=${LIFT_PRODUCT_CODE} ethercat_interface:=${LIFT_ETHERCAT_INTERFACE} brake_control_enabled:=${LIFT_BRAKE_CONTROL_ENABLED} brake_release_wait_ms:=${LIFT_BRAKE_RELEASE_WAIT_MS} use_persistent_zero_offset:=true zero_offset_file:=${LIFT_ZERO_OFFSET_FILE}" \
         "${LOG_DIR}/lift_controller.log" \
-        "lift controller launch"
+        "lift controller launch" \
+        "${LIFT_LOG_DIR}"
 fi
 
 echo "启动 arm_ik 服务节点..."
+log_startup_diagnostic "Starting robot_control launch (ROS log dir: ${ROBOT_CONTROL_LOG_DIR})."
 run_as_user_bg \
     "ros2 launch robot_control robot_control.launch.py" \
     "${LOG_DIR}/robot_srv.log" \
-    "robot control launch"
+    "robot control launch" \
+    "${ROBOT_CONTROL_LOG_DIR}"
 
 echo "启动完成"
+log_startup_diagnostic "Lower workspace startup complete; session log dir: ${SESSION_LOG_DIR}."
 
 # start.sh is the systemd MainPID. Keep it alive and fail the unit whenever a
 # required child exits. The EXIT trap performs bounded cleanup in every path.

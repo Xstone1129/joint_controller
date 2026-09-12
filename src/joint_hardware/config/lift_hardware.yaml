@@ -57,7 +57,7 @@ lift_velocity_direct_stop_in_stop_window: false
 lift_stationary_velocity_threshold_mps: 0.001
 command_epsilon_m: 0.0005
 max_feedback_jump_m: 0.2
-max_feedback_velocity_mps: 0.08
+max_feedback_velocity_mps: 0.06
 feedback_velocity_tolerance_mps: 0.003
 lift_motion_command_period_ms: 10
 

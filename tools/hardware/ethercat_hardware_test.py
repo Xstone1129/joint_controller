@@ -39,9 +39,59 @@ def allocate_driver_log(configured_path: str | Path) -> Path:
     """Create a unique per-run driver log path and update a latest pointer."""
     base = Path(str(configured_path))
     log_root = os.environ.get("JOINT_CONTROLLER_LOG_ROOT", "").strip()
-    if log_root:
+    dynamic_session = os.environ.get("JUNIOR_RUNTIME_LOG_DYNAMIC", "") == "1"
+    if log_root and not dynamic_session:
         root = Path(log_root)
         base = root / base.name
+    elif dynamic_session or not base.is_absolute() or str(base).startswith("/tmp/"):
+        # Keep standalone invocations in the same persistent log hierarchy as
+        # the managed server.  The shell entry points set
+        # JOINT_CONTROLLER_LOG_ROOT; this fallback also covers direct calls to
+        # ethercat_hardware_test.py and older configs that still say /tmp.
+        run_user = (
+            os.environ.get("JUNIOR_RUNTIME_LOG_USER", "").strip()
+            or os.environ.get("SUDO_USER", "").strip()
+        )
+        if not run_user:
+            run_user = pwd.getpwuid(os.getuid()).pw_name
+            if run_user == "root":
+                try:
+                    workspace_owner = pwd.getpwuid(SCRIPT_DIR.parent.parent.stat().st_uid).pw_name
+                except (KeyError, OSError):
+                    workspace_owner = ""
+                if workspace_owner and workspace_owner != "root":
+                    run_user = workspace_owner
+                else:
+                    try:
+                        pwd.getpwnam("user")
+                    except KeyError:
+                        pass
+                    else:
+                        run_user = "user"
+        try:
+            run_home = Path(pwd.getpwnam(run_user).pw_dir)
+        except KeyError:
+            run_home = Path.home()
+        workspace_root = SCRIPT_DIR.parent.parent
+        marker = Path(
+            os.environ.get(
+                "JOINT_CONTROLLER_SESSION_NAME_FILE",
+                str(workspace_root / ".junior_runtime_session_name"),
+            )
+        )
+        session_name = "standalone-hardware"
+        try:
+            candidate = marker.read_text(encoding="utf-8").strip()
+        except OSError:
+            candidate = ""
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", candidate):
+            session_name = candidate
+        log_root = os.environ.get("JUNIOR_LOG_ROOT", "").strip()
+        if log_root:
+            root = Path(log_root)
+        else:
+            root = run_home / ".ros" / "log"
+        base = root / session_name / "runtime" / base.name
     stamp = time.strftime("%Y%m%d-%H%M%S")
     unique = base.with_name(f"{base.stem}-{stamp}-{os.getpid()}{base.suffix}")
     unique.parent.mkdir(parents=True, exist_ok=True)
@@ -625,7 +675,7 @@ def run_arm_test(config: dict[str, Any], config_path: Path) -> int:
             f"driver already running: {driver} (PID(s): {', '.join(str(pid) for pid in pids)}); "
             "stop ROS/IGH before this test"
         )
-    log_path = allocate_driver_log(arm.get("driver_log", "/tmp/heavy_v1_igh_driver.log"))
+    log_path = allocate_driver_log(arm.get("driver_log", "heavy_v1_igh_driver.log"))
     log_file = log_path.open("wb")
     env = os.environ.copy()
     library_dir = str(config.get("ethercat", {}).get("library_dir", "/usr/local/etherlab/lib"))

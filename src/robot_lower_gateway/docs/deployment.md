@@ -41,6 +41,8 @@ MAC 地址。
                               v
        /ubuntu_lower_gateway/joint_states
        /ubuntu_lower_gateway/diagnostics
+       /ubuntu_lower_gateway/lift/status
+       /ubuntu_lower_gateway/lift/joint_states
                               |
                          ROS 2 / DDS
                               |
@@ -66,6 +68,8 @@ PDO。原控制服务和 EtherCAT master 必须始终只有一个 owner。
 |---|---|---|
 | `/ubuntu_lower_gateway/joint_states` | `sensor_msgs/msg/JointState` | 固定 14 轴顺序的有效反馈 |
 | `/ubuntu_lower_gateway/diagnostics` | `diagnostic_msgs/msg/DiagnosticArray` | 输入完整性、新鲜度和驱动状态 |
+| `/ubuntu_lower_gateway/lift/status` | `robot_control_msg/msg/LiftStatus` | lift EtherCAT、CiA402、电源、刹车和控制状态 |
+| `/ubuntu_lower_gateway/lift/joint_states` | `sensor_msgs/msg/JointState` | 归一化后的单轴 lift 反馈 |
 
 可选代理服务：
 
@@ -77,6 +81,15 @@ PDO。原控制服务和 EtherCAT master 必须始终只有一个 owner。
 | `/ubuntu_lower_gateway/joint_absolute_control` | `/arm_absolute_control` |
 | `/ubuntu_lower_gateway/cartesian_increment_control` | `/cartesian_increment_control` |
 | `/ubuntu_lower_gateway/cartesian_absolute_control` | `/cartesian_absolute_control` |
+| `/ubuntu_lower_gateway/lift/set_power` | `/lift_brake_command` |
+| `/ubuntu_lower_gateway/lift/command` | `/joint/lift/command` |
+| `/ubuntu_lower_gateway/lift/stop` | `/joint/lift/stop` |
+| `/ubuntu_lower_gateway/lift/hold` | `/joint/lift/hold` |
+
+Lift 不并入双臂 `/set_robot_power` 的 14 轴数组。`lift/set_power=true` 只有在新的驱动反馈
+同时确认 EtherCAT/WKC 有效、`command_enabled=true`、`enabled=true` 且刹车已释放时才成功；
+超时会走同一个原生失能入口自动回滚。`false`、`stop` 和 `hold` 是独立安全入口，不会被
+双臂长运动代理占用的互斥锁阻塞。
 
 Workspace 生命周期不经过上述代理，仍使用：
 
@@ -630,7 +643,7 @@ sudo systemctl restart robot-lower-gateway.service
 ros2 run robot_lower_gateway verify_gateway_proxy.sh
 ```
 
-`verify_gateway_proxy.sh` 只检查六个服务的名称和类型，不发送请求。
+`verify_gateway_proxy.sh` 只检查十个服务和两个 lift topic 的名称及类型，不发送请求。
 
 确认拓扑：
 

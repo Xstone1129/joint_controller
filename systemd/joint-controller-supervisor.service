@@ -16,6 +16,7 @@ Environment=FASTDDS_BUILTIN_TRANSPORTS=
 Environment=FASTDDS_DEFAULT_PROFILES_FILE=
 Environment=WORKSPACE_CONTROL_ALLOWED_SOURCE=jetson_192_168_2_10
 Environment=WORKSPACE_STATUS_SOURCE=ubuntu_192_168_2_20
+Environment=JUNIOR_RUNTIME_LOG_USER=user
 ExecStart=/home/user/joint_controller/scripts/run_workspace_supervisor.sh
 Restart=always
 RestartSec=2

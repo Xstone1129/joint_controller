@@ -11,7 +11,6 @@ import math
 import os
 from pathlib import Path
 import signal
-import select
 import subprocess
 import threading
 import time
@@ -50,36 +49,147 @@ class HardwareWorkers:
         self.arm: ArmWorker | None = None
         self.lift: LiftWorker | None = None
         self.ethercat_started = False
+        self._lifecycle_lock = threading.RLock()
+        self._startup_threads: dict[str, threading.Thread] = {}
+        self._startup_workers: dict[str, Any] = {}
+        self._startup_errors: dict[str, str] = {}
+        self._stopping = False
 
     def start(self) -> None:
-        started: list[Any] = []
+        """Compatibility helper for callers that explicitly want both workers."""
+        started: list[str] = []
         try:
-            init_script = Path(str(self.config.get("ethercat", {}).get("init_script", "/etc/init.d/ethercat")))
+            self._ensure_ethercat()
+            self._start_worker("arm")
+            started.append("arm")
+            self._start_worker("lift")
+            started.append("lift")
+        except Exception:
+            for device in reversed(started):
+                worker = getattr(self, device)
+                if worker is not None:
+                    worker.stop()
+                    setattr(self, device, None)
+            if self.ethercat_started:
+                self._stop_ethercat()
+            raise
+
+    def _configured_devices_ready(self) -> bool:
+        masters = self.config.get("ethercat", {}).get("masters", {})
+        return bool(masters) and all(
+            Path(f"/dev/EtherCAT{int(master['index'])}").exists()
+            for master in masters.values()
+        )
+
+    def _ensure_ethercat(self) -> None:
+        with self._lifecycle_lock:
+            # run_hardware_server.sh normally starts EtherLab before this
+            # process. Do not claim or stop an already-existing master.
+            if self._configured_devices_ready():
+                return
+            init_script = Path(
+                str(self.config.get("ethercat", {}).get("init_script", "/etc/init.d/ethercat"))
+            )
             result = subprocess.run(
-                [str(init_script), "start"], check=False, text=True, capture_output=True, timeout=20.0
+                [str(init_script), "start"],
+                check=False,
+                text=True,
+                capture_output=True,
+                timeout=20.0,
             )
             if result.returncode != 0:
                 raise WorkerError(f"failed to start EtherCAT master: {result.stderr.strip()}")
             self.ethercat_started = True
-            for master in self.config.get("ethercat", {}).get("masters", {}).values():
-                device = Path(f"/dev/EtherCAT{int(master['index'])}")
-                if not device.exists():
-                    raise WorkerError(f"required EtherCAT device is missing: {device}")
-            self.arm = ArmWorker(self.config, self.config_path)
-            self.arm.start()
-            started.append(self.arm)
-            self.lift = LiftWorker(self.config, self.config_path)
-            self.lift.start()
-            started.append(self.lift)
+            if not self._configured_devices_ready():
+                raise WorkerError("required EtherCAT master devices are missing")
+
+    def _start_worker(self, device: str) -> None:
+        with self._lifecycle_lock:
+            if self._stopping:
+                raise WorkerError("hardware workers are stopping")
+            if getattr(self, device) is not None:
+                return
+        worker: Any = ArmWorker(self.config, self.config_path) if device == "arm" else LiftWorker(
+            self.config, self.config_path
+        )
+        with self._lifecycle_lock:
+            self._startup_workers[device] = worker
+        failed = False
+        try:
+            self._ensure_ethercat()
+            worker.start()
+            with self._lifecycle_lock:
+                if self._stopping:
+                    worker.stop()
+                    return
+                setattr(self, device, worker)
         except Exception:
-            for worker in reversed(started):
-                worker.stop()
-            self.arm = None
-            self.lift = None
-            self._stop_ethercat()
+            failed = True
             raise
+        finally:
+            with self._lifecycle_lock:
+                self._startup_workers.pop(device, None)
+                stop_owned_ethercat = (
+                    failed
+                    and self.ethercat_started
+                    and self.arm is None
+                    and self.lift is None
+                    and not self._startup_workers
+                )
+            if stop_owned_ethercat:
+                self._stop_ethercat()
+
+    def _start_worker_background(self, device: str) -> None:
+        try:
+            self._start_worker(device)
+        except Exception as exc:
+            with self._lifecycle_lock:
+                self._startup_errors[device] = str(exc)
+        finally:
+            with self._lifecycle_lock:
+                self._startup_threads.pop(device, None)
+
+    def ensure_worker(self, device: str) -> None:
+        if device not in {"arm", "lift"}:
+            raise WorkerError(f"unsupported worker: {device}")
+        with self._lifecycle_lock:
+            if self._stopping:
+                raise WorkerError("hardware workers are stopping")
+            if getattr(self, device) is not None:
+                return
+            thread = self._startup_threads.get(device)
+            if thread is not None and thread.is_alive():
+                return
+            self._startup_errors.pop(device, None)
+            thread = threading.Thread(
+                target=self._start_worker_background,
+                args=(device,),
+                name=f"{device}-worker-start",
+                daemon=True,
+            )
+            self._startup_threads[device] = thread
+            thread.start()
+
+    def startup_state(self, device: str) -> tuple[str, str]:
+        with self._lifecycle_lock:
+            if getattr(self, device) is not None:
+                return "ready", ""
+            error = self._startup_errors.get(device)
+            if error:
+                return "error", error
+            thread = self._startup_threads.get(device)
+            if thread is not None and thread.is_alive():
+                return "starting", ""
+            return "idle", ""
 
     def stop(self, *, stop_ethercat: bool = False) -> None:
+        with self._lifecycle_lock:
+            self._stopping = True
+            startup_workers = list(self._startup_workers.values())
+        for worker in startup_workers:
+            worker.stop()
+        for thread in list(self._startup_threads.values()):
+            thread.join(timeout=1.0)
         for worker in (self.lift, self.arm):
             if worker is not None:
                 worker.stop()
@@ -88,7 +198,7 @@ class HardwareWorkers:
         # Keep EtherLab masters alive between Direct sessions. A client leave
         # must stop workers, but stopping the masters here makes the next
         # ENTER_DIRECT skip the full setup and lose slave discovery.
-        if stop_ethercat:
+        if stop_ethercat and self.ethercat_started:
             self._stop_ethercat()
 
     def _stop_ethercat(self) -> None:
@@ -147,6 +257,10 @@ class ArmWorker:
         self.motion_watch_position: dict[int, int] = {}
         self.motion_watch_started: dict[int, float] = {}
 
+    def _raise_if_start_cancelled(self) -> None:
+        if self.stop_event.is_set():
+            raise WorkerError("arm worker startup cancelled")
+
     def _load_limits(self, units: float) -> None:
         urdf = Path(str(self.arm_config.get(
             "limits_urdf", self.config_path.parent.parent.parent / "src/robot_arm_description/urdf/right_left_arm.urdf"
@@ -171,11 +285,12 @@ class ArmWorker:
 
     def start(self) -> None:
         try:
+            self._raise_if_start_cancelled()
             if os.geteuid() != 0:
                 raise WorkerError("real arm worker requires root")
             driver_path = resolve_driver(self.config, self.config_path)
             log_path = allocate_driver_log(
-                self.arm_config.get("driver_log", "/tmp/heavy_v1_igh_driver.log")
+                self.arm_config.get("driver_log", "heavy_v1_igh_driver.log")
             )
             log_file = log_path.open("wb")
             env = os.environ.copy()
@@ -183,10 +298,12 @@ class ArmWorker:
             env["LD_LIBRARY_PATH"] = library_dir + ":" + env.get("LD_LIBRARY_PATH", "")
             self.driver = subprocess.Popen([str(driver_path)], stdout=log_file, stderr=subprocess.STDOUT, env=env)
             log_file.close()
+            self._raise_if_start_cancelled()
             deadline = time.monotonic() + float(self.arm_config.get("feedback_ready_timeout_s", 35.0))
             self.desire_block = SharedMemory(str(self.arm_config["shared_memory"]["desire"]), DesireRegion)
             self.real_block = SharedMemory(str(self.arm_config["shared_memory"]["real"]), RealRegion)
             while time.monotonic() < deadline:
+                self._raise_if_start_cancelled()
                 if self.driver.poll() is not None:
                     raise WorkerError(
                         f"IGH driver exited with code {self.driver.returncode}; log={log_path}"
@@ -207,6 +324,7 @@ class ArmWorker:
             mode = int(str(self.arm_config.get("csp_mode", "0x08")), 0)
             feedback_deadline = time.monotonic() + float(self.arm_config.get("feedback_ready_timeout_s", 35.0))
             while not arm_feedback_ready(self.real, list(range(14)), mode):
+                self._raise_if_start_cancelled()
                 if time.monotonic() >= feedback_deadline:
                     statuses = ",".join(
                         f"{slot}:state=0x{int(self.real.axis_state[slot].ec_ctrstate):04x},"
@@ -223,6 +341,7 @@ class ArmWorker:
                         f"IGH driver exited with code {self.driver.returncode}; log={log_path}"
                     )
                 time.sleep(0.02)
+            self._raise_if_start_cancelled()
             self._hold_locked()
             self.thread = threading.Thread(target=self._loop, name="arm-worker", daemon=True)
             self.thread.start()
@@ -418,37 +537,54 @@ class LiftWorker:
         self.proc: subprocess.Popen[bytes] | None = None
         self.lock = threading.Lock()
         self.enabled = False
+        self.stop_event = threading.Event()
+        # Partial stdout line carried between non-blocking reads.
+        self._pending = ""
+
+    def _raise_if_start_cancelled(self) -> None:
+        if self.stop_event.is_set():
+            raise WorkerError("lift worker startup cancelled")
 
     def start(self) -> None:
         try:
+            self._raise_if_start_cancelled()
             lift = self.config["lift"]
             binary = (self.config_path.parent / str(lift["cli_binary"])).resolve()
             if not binary.is_file() or not os.access(binary, os.X_OK):
                 raise WorkerError(f"lift CLI binary is missing: {binary}")
             cmd = [str(binary), "--command-mode", "--interface", str(lift["interface"]), "--master", str(lift["master"]), "--alias", str(lift["slave_alias"]), "--position", str(lift["slave_position"]), "--min-position", str(lift["min_position_m"]), "--max-position", str(lift["max_position_m"]), "--speed", str(lift.get("max_speed_mps", 0.015)), "--accel", str(lift.get("acceleration_mps2", 0.033333333)), "--zero-offset-file", str(lift["zero_offset_file"])]
             self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            self._raise_if_start_cancelled()
+            # Read stdout without blocking.  The CLI is legitimately silent for
+            # seconds while it activates the master and configures PDOs, and a
+            # complete line that the buffered reader already holds must still be
+            # read even though select() on the raw fd reports nothing new.
+            os.set_blocking(self.proc.stdout.fileno(), False)
+            self._pending = ""
             # The lift backend may need several EtherCAT cycles to configure
             # PDOs and obtain its first valid sample after a master restart.
             deadline = time.monotonic() + 30.0
             output_tail: list[str] = []
             while time.monotonic() < deadline:
+                self._raise_if_start_cancelled()
                 if self.proc.stdout is None:
                     raise WorkerError("lift CLI stdout is unavailable")
-                readable, _, _ = select.select([self.proc.stdout], [], [], max(0.0, deadline - time.monotonic()))
-                if not readable:
-                    break
-                line = self.proc.stdout.readline()
-                if line:
-                    output_tail.append(line.decode("utf-8", errors="replace").strip())
+                line = self._read_cli_line()
+                if line is not None:
+                    output_tail.append(line)
                     del output_tail[:-8]
-                if b"COMMAND_MODE_READY" in line:
-                    return
+                    if "COMMAND_MODE_READY" in line:
+                        self._raise_if_start_cancelled()
+                        return
+                    continue
                 if self.proc.poll() is not None:
                     detail = "; ".join(item for item in output_tail if item)
                     raise WorkerError(
                         f"lift CLI exited with code {self.proc.returncode}"
                         + (f": {detail}" if detail else "")
                     )
+                # Silence is not failure: keep waiting until the deadline.
+                time.sleep(0.02)
             detail = "; ".join(item for item in output_tail if item)
             raise WorkerError(
                 "lift CLI did not become ready within 30 seconds"
@@ -506,6 +642,26 @@ class LiftWorker:
         except (KeyError, ValueError):
             return {"feedback_available": False, "feedback_error": "invalid lift state response"}
 
+    def _read_cli_line(self) -> str | None:
+        """Return the next complete CLI stdout line, or None when none is ready.
+
+        The stream is non-blocking, so a read can return a partial line: bytes
+        are accumulated until a newline arrives, and a caller keeps control of
+        its own deadline instead of blocking.
+        """
+        if self.proc is None or self.proc.stdout is None:
+            return None
+        while "\n" not in self._pending:
+            try:
+                raw = self.proc.stdout.readline()
+            except BlockingIOError:
+                return None
+            if not raw:
+                return None
+            self._pending += raw.decode("utf-8", errors="replace")
+        line, self._pending = self._pending.split("\n", 1)
+        return line.strip()
+
     def _read_state(self, timeout_s: float = 0.5) -> dict[str, Any]:
         if self.proc is None or self.proc.stdin is None or self.proc.stdout is None:
             return {"feedback_available": False, "feedback_error": "lift worker is not running"}
@@ -514,19 +670,19 @@ class LiftWorker:
             self.proc.stdin.write(b"STATE\n")
             self.proc.stdin.flush()
             while time.monotonic() < deadline:
-                remaining = max(0.0, deadline - time.monotonic())
-                readable, _, _ = select.select([self.proc.stdout], [], [], remaining)
-                if not readable:
-                    break
-                line = self.proc.stdout.readline().decode("utf-8", errors="replace").strip()
+                line = self._read_cli_line()
+                if line is None:
+                    if self.proc.poll() is not None:
+                        break
+                    time.sleep(0.005)
+                    continue
                 parsed = self._parse_state_line(line)
                 if parsed is not None:
                     return parsed
-                if self.proc.poll() is not None:
-                    break
         return {"feedback_available": False, "feedback_error": "lift state response timed out"}
 
     def stop(self) -> None:
+        self.stop_event.set()
         if self.proc is None: return
         try:
             if self.proc.stdin is not None:

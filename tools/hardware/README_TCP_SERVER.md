@@ -76,8 +76,11 @@ HARDWARE_SERVER_HOST=192.168.2.20 ./scripts/hardware_server_ctl.sh probe
 `journalctl -u hardware-server.service`；完整控制 payload 不会写入日志。需要查看网络层数据
 时可临时使用 `sudo tcpdump -ni <控制网卡> -X 'tcp port 7447'`，诊断结束后应立即停止抓包。
 
-真实 arm worker 的 `igh_driver` 输出按启动实例写入 `/tmp/heavy_v1_igh_driver-*.log`，
-最近一次日志为 `/tmp/heavy_v1_igh_driver.latest.log`。
+真实 arm worker 的 `igh_driver` 输出按启动实例写入
+`/home/user/.ros/log/<runtime-id>/runtime/heavy_v1_igh_driver-*.log`，最近一次日志为同目录
+的 `heavy_v1_igh_driver.latest.log`。服务器控制台输出为
+`/home/user/.ros/log/<runtime-id>/console.log`；`<runtime-id>` 来自上位机写入的
+`.junior_runtime_session_name`，没有标记时使用 `standalone-hardware`。
 
 ## 与 ROS2 的互斥
 

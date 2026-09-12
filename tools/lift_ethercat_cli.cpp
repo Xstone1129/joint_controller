@@ -21,6 +21,7 @@
 #include <limits>
 #include <map>
 #include <cstdio>
+#include <pwd.h>
 #include <sys/select.h>
 #include <sstream>
 #include <string>
@@ -195,7 +196,8 @@ bool discover_identity(uint32_t master, uint16_t position, uint32_t & vendor, ui
 
 struct Options {
   std::string interface{"enp5s0"};
-  std::string log_path{"/tmp/lift_ethercat_cli.csv"};
+  std::string log_path{"lift_ethercat_cli.csv"};
+  bool log_supplied{false};
   std::string zero_offset_file;
   std::string motor_id{"LVM08008H3G3-M17"};
   uint32_t zero_offset_uid{std::numeric_limits<uint32_t>::max()};
@@ -237,7 +239,7 @@ int main(int argc, char ** argv) {
     if (arg == "--enable") options.auto_enable = true;
     else if (arg == "--command-mode") options.command_mode = true;
     else if (arg == "--interface" && i + 1 < argc) { options.interface = argv[++i]; options.interface_supplied = true; }
-    else if (arg == "--log" && i + 1 < argc) options.log_path = argv[++i];
+    else if (arg == "--log" && i + 1 < argc) { options.log_path = argv[++i]; options.log_supplied = true; }
     else if (arg == "--master" && i + 1 < argc) { options.master = std::stoul(argv[++i], nullptr, 0); options.master_supplied = true; }
     else if (arg == "--alias" && i + 1 < argc) { options.alias = static_cast<uint16_t>(std::stoul(argv[++i], nullptr, 0)); options.alias_supplied = true; }
     else if (arg == "--position" && i + 1 < argc) { options.position = static_cast<uint16_t>(std::stoul(argv[++i], nullptr, 0)); options.position_supplied = true; }
@@ -266,6 +268,46 @@ int main(int argc, char ** argv) {
   options.sign = config_double(config, "lift_sign", options.sign);
   options.units = config_uint(config, "command_units_per_rev", options.units);
   options.motor_id = config_string(config, "motor_id", options.motor_id);
+  if (!options.log_supplied) {
+    const char * dynamic_session = std::getenv("JUNIOR_RUNTIME_LOG_DYNAMIC");
+    if (const char * root = std::getenv("JOINT_CONTROLLER_LOG_ROOT");
+        root != nullptr && *root != '\0' &&
+        !(dynamic_session != nullptr && std::string(dynamic_session) == "1")) {
+      options.log_path = std::string(root) + "/lift_ethercat_cli.csv";
+    } else {
+      const char * configured_user = std::getenv("JUNIOR_RUNTIME_LOG_USER");
+      const char * sudo_user = std::getenv("SUDO_USER");
+      const passwd * account = nullptr;
+      if (configured_user != nullptr && *configured_user != '\0') {
+        account = getpwnam(configured_user);
+      } else if (sudo_user != nullptr && *sudo_user != '\0') {
+        account = getpwnam(sudo_user);
+      } else {
+        account = getpwuid(getuid());
+        if (account != nullptr && std::string(account->pw_name) == "root") {
+          account = getpwnam("user");
+        }
+      }
+      const std::string home = account != nullptr ? account->pw_dir :
+        (std::getenv("HOME") != nullptr ? std::getenv("HOME") : "/home/user");
+      std::string session = "standalone-hardware";
+      const char * marker_override = std::getenv("JOINT_CONTROLLER_SESSION_NAME_FILE");
+      const std::string marker_path = marker_override != nullptr && *marker_override != '\0' ?
+        marker_override : home + "/joint_controller/.junior_runtime_session_name";
+      std::ifstream marker(marker_path);
+      std::string candidate;
+      if (marker && std::getline(marker, candidate) &&
+        !candidate.empty() && candidate.find_first_not_of(
+          "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-") == std::string::npos)
+      {
+        session = candidate;
+      }
+      const char * log_root = std::getenv("JUNIOR_LOG_ROOT");
+      const std::string log_root_path = log_root != nullptr && *log_root != '\0' ?
+        log_root : home + "/.ros/log";
+      options.log_path = log_root_path + "/" + session + "/runtime/lift_ethercat_cli.csv";
+    }
+  }
   if (!std::isfinite(options.max_speed_mps) || options.max_speed_mps <= 0.0 ||
     !std::isfinite(options.acceleration_mps2) || options.acceleration_mps2 <= 0.0) {
     std::cerr << "--speed and --accel must be positive finite values.\n";

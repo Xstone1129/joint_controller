@@ -55,7 +55,7 @@ class HardwareActivityProbe:
             return False
         return result.returncode == 0
 
-    def _igh_pids(self) -> set[int]:
+    def _hardware_tool_pids(self) -> set[int]:
         pids: set[int] = set()
         try:
             pid = int(self.pid_file.read_text(encoding="ascii").strip())
@@ -73,10 +73,17 @@ class HardwareActivityProbe:
                 continue
             try:
                 comm = (entry / "comm").read_text(encoding="utf-8").strip()
-                cmdline = (entry / "cmdline").read_bytes().split(b"\0", 1)[0]
+                raw_cmdline = (entry / "cmdline").read_bytes()
+                cmdline = os.fsdecode(raw_cmdline).replace("\0", " ")
             except OSError:
                 continue
-            if comm == "igh_driver" or Path(os.fsdecode(cmdline)).name == "igh_driver":
+            executable = Path(cmdline.split(" ", 1)[0]).name if cmdline else ""
+            if (
+                comm == "igh_driver"
+                or executable == "igh_driver"
+                or "lift_ethercat_cli" in cmdline
+                or "ethercat_hardware_test.py" in cmdline
+            ):
                 pids.add(int(entry.name))
         return pids
 
@@ -108,12 +115,18 @@ class HardwareActivityProbe:
 
     def active_reasons(self) -> list[str]:
         reasons: list[str] = []
-        if self._service_active():
+        pids = sorted(self._hardware_tool_pids())
+        device_owners = self._device_owners()
+        # Only report the service as a blocker if there is actually a hardware
+        # tool process or an open EtherCAT device.  systemctl may still report
+        # the service as "active" during the TimeoutStopSec window after the
+        # IGH driver has already exited; without this guard the TCP console
+        # cannot enter Direct mode until systemd marks the service inactive.
+        if self._service_active() and (pids or device_owners):
             reasons.append(f"{self.service_name} is active")
-        pids = sorted(self._igh_pids())
         if pids:
-            reasons.append("IGH driver is running (pid " + ", ".join(map(str, pids)) + ")")
-        for pid, device in self._device_owners():
+            reasons.append("standalone EtherCAT hardware tool is running (pid " + ", ".join(map(str, pids)) + ")")
+        for pid, device in device_owners:
             reasons.append(f"pid {pid} has {device} open")
         return reasons
 

@@ -38,6 +38,9 @@ sudo install -m 0644 \
 sudo install -m 0644 \
   "${WORKSPACE_ROOT}/systemd/joint-controller-supervisor.service" \
   "${SYSTEMD_DIR}/joint-controller-supervisor.service"
+sudo install -m 0644 \
+  "${WORKSPACE_ROOT}/systemd/hardware-server.service" \
+  "${SYSTEMD_DIR}/hardware-server.service"
 
 sudo install -d -m 0755 "${GATEWAY_CONFIG_DIR}"
 sudo install -m 0644 "${GATEWAY_CONFIG_SOURCE}" \
@@ -105,6 +108,7 @@ echo "Installed workspace control services."
 echo "Boot policy: supervisor enabled; SIM/REAL stacks disabled until requested."
 echo "Supervisor: systemctl status joint-controller-supervisor.service"
 echo "Lower gateway: systemctl status robot-lower-gateway.service"
+echo "TCP hardware server: systemctl status hardware-server.service"
 echo "Simulation stack: systemctl status joint-controller-stack-sim.service"
 echo "Simulation RViz: systemctl status joint-controller-rviz.service"
 echo "Real stack: systemctl status joint-controller-stack-real.service"

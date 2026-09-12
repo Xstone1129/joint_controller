@@ -34,17 +34,21 @@ PDO。代理默认关闭，必须通过 launch 参数或配置明确打开。
 - `/arm_absolute_control`
 - `/cartesian_increment_control`
 - `/cartesian_absolute_control`
+- `/lift_brake_command`（网关入口为 `lift/set_power`，等待真实反馈确认）
+- `/joint/lift/command`
+- `/joint/lift/stop`
+- `/joint/lift/hold`
+- `/lift_set_drive_zero`
 
 网关侧的入口默认位于 `/ubuntu_lower_gateway/` 下，因此不会和原 Ubuntu 控制服务产生
 第二个全局 owner。
 
-当前版本仍没有实现：
+当前版本不拥有或重新实现：
 
 - Workspace START/STOP；
-- 电机使能/失能命令；
-- POSITION/EFFORT 模式切换；
-- 单关节或 14 轴目标下发；
-- 笛卡尔运动命令；
+- 双臂或 lift 的底层使能状态机；
+- POSITION/EFFORT 模式状态机；
+- 关节、笛卡尔或 lift 轨迹算法；
 - EtherCAT PDO 写入。
 
 因此当前包不能替代原工作空间中的 `robot_control`、controller、hardware interface 或
@@ -373,12 +377,21 @@ native_services:
   joint_absolute: /arm_absolute_control
   cartesian_increment: /cartesian_increment_control
   cartesian_absolute: /cartesian_absolute_control
+  lift_power: /lift_brake_command
+  lift_command: /joint/lift/command
+  lift_stop: /joint/lift/stop
+  lift_hold: /joint/lift/hold
+  lift_set_drive_zero: /lift_set_drive_zero
 
 command_timeout_ms:
   power: 30000
   mode: 5000
   joint: 30000
   cartesian: 60000
+  lift_power: 30000
+  lift_command: 5000
+  lift_safety: 5000
+  lift_set_drive_zero: 10000
 ```
 
 每个原生 service 必须继续由目标工作空间的正式 controller 提供。不要把
@@ -586,6 +599,11 @@ ros2 launch robot_lower_gateway lower_gateway.launch.py \
 /ubuntu_lower_gateway/joint_absolute_control
 /ubuntu_lower_gateway/cartesian_increment_control
 /ubuntu_lower_gateway/cartesian_absolute_control
+/ubuntu_lower_gateway/lift/set_power
+/ubuntu_lower_gateway/lift/command
+/ubuntu_lower_gateway/lift/stop
+/ubuntu_lower_gateway/lift/hold
+/ubuntu_lower_gateway/lift/set_drive_zero
 ```
 
 也可以先运行包内的只读拓扑检查脚本：
@@ -594,8 +612,8 @@ ros2 launch robot_lower_gateway lower_gateway.launch.py \
 ros2 run robot_lower_gateway verify_gateway_proxy.sh
 ```
 
-它只检查六个 proxy 的 service 类型和 `/ubuntu_lower_gateway` 节点是否可发现，不会发送
-任何 service 请求。
+它只检查十一个 proxy、两个 lift feedback topic 的类型和 `/ubuntu_lower_gateway` 节点是否
+可发现，不会发送任何 service 请求。
 
 先执行无运动、仿真安全的电源失能请求，确认响应来自原服务：
 

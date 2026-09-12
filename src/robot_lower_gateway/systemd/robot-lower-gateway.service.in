@@ -9,6 +9,7 @@ User=@ROBOT_USER@
 Group=@ROBOT_GROUP@
 WorkingDirectory=@GATEWAY_WORKSPACE@
 EnvironmentFile=-/etc/robot-lower-gateway/gateway.env
+Environment=JUNIOR_RUNTIME_LOG_USER=@ROBOT_USER@
 ExecStart=@GATEWAY_RUNNER@
 Restart=on-failure
 RestartSec=2
