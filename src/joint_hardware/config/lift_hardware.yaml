@@ -33,7 +33,20 @@ position_max_m: 0.0
 # that search relative to the position where reset starts, because the
 # pre-calibration boot coordinate may call any physical lift height zero.
 reset_max_search_travel_m: 0.85
-max_rpm: 1440
+max_rpm: 1080
+# Canonical logical limits shared by the lift controller and Heavy gateway.
+# 1080 rpm * 3.333333333 mm/rev / 60000 = 0.060 m/s.
+max_velocity_mps: 0.060
+max_acceleration_mps2: 0.033333333
+max_jerk_mps3: 0.4
+default_velocity_scale: 0.8
+jog_timeout_sec: 0.45
+brake_gate_stable_sec: 0.10
+driver_status_timeout_sec: 2.0
+target_stable_sec: 1.0
+goal_tolerance_m: 0.001
+stationary_velocity_mps: 0.001
+status_rate_hz: 20.0
 # When feedback is outside the software travel, only an explicit command back
 # into the valid range is accepted, at no more than this recovery speed.
 position_limit_recovery_max_rpm: 300
@@ -57,9 +70,36 @@ lift_velocity_direct_stop_in_stop_window: false
 lift_stationary_velocity_threshold_mps: 0.001
 command_epsilon_m: 0.0005
 max_feedback_jump_m: 0.2
-max_feedback_velocity_mps: 0.06
+max_feedback_velocity_mps: 0.060
 feedback_velocity_tolerance_mps: 0.003
 lift_motion_command_period_ms: 10
+
+# Heavy gateway lift safety parameters. Keeping these beside the hardware
+# limits prevents a deployment copy from silently imposing another speed.
+lift_position_tolerance_m: 0.002
+lift_max_acceleration_mps2: 0.033333333
+allow_lift_only_follow: true
+lift_only_arm_hold_position_tolerance_rad: 0.001
+brake_lock_velocity_threshold_mps: 0.001
+lift_native_name: joint_motor
+heavy_lift_brake_native_service: /lift_brake_command
+lift_canonical_joint_name: joint_motor
+lift_native_joint_name: joint_motor
+lift_driver_status_topic: /joint/lift/driver_status
+lift_control_status_topic: /joint/lift/control_status
+lift_joint_state_topic: /lift/joint_states
+lift_power_service: /lift_brake_command
+lift_command_service: /joint/lift/command
+lift_stop_service: /joint/lift/stop
+lift_hold_service: /joint/lift/hold
+lift_set_drive_zero_service: /lift_set_drive_zero
+lift_enable_timeout_ms: 1000
+lift_power_timeout_ms: 30000
+lift_command_timeout_ms: 5000
+lift_safety_timeout_ms: 5000
+lift_set_drive_zero_timeout_ms: 10000
+lift_status_stale_timeout_ms: 500
+lift_joint_state_stale_timeout_ms: 500
 
 lift_startup_motion_guard_enabled: true
 lift_startup_motion_guard_ms: 3000

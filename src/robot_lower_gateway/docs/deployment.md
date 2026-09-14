@@ -1,5 +1,10 @@
 # robot_lower_gateway 下位机通信功能包部署与迁移手册
 
+配置来源约束：本部署流程不使用系统级配置目录。网关配置始终来自工作区
+`install/robot_lower_gateway/share/robot_lower_gateway/config/erobot_v1.yaml`，升降配置始终来自
+`install/joint_hardware/share/joint_hardware/config/lift_hardware.yaml`。不要创建外部环境文件，
+也不要传入外部配置路径。
+
 本文是 `robot_lower_gateway` 的统一部署文档，覆盖控制网络、ROS 2/DDS 环境、功能包配置、
 开机自启动、上下位机联调，以及迁移到其他机器人工作空间或更换上位机电脑的流程。
 
@@ -13,8 +18,8 @@ MAC 地址。
 | 当前下位机工作空间 | `/home/user/joint_controller` |
 | Jetson 上位机 | `192.168.2.10/24` |
 | ROS 2 | Humble |
-| ROS Domain | `55` |
-| RMW | `rmw_fastrtps_cpp` |
+| ROS Domain | `2` |
+| RMW | `rmw_cyclonedds_cpp` |
 | DDS transport | `UDPv4` |
 | Ubuntu package | `robot_lower_gateway` |
 | Ubuntu node | `/ubuntu_lower_gateway` |
@@ -239,13 +244,12 @@ Fast DDS Discovery Server 或静态 peers；不能只在一端设置 `ROS_DISCOV
 source /opt/ros/humble/setup.bash
 source /对应工作空间/install/setup.bash
 
-export ROS_DOMAIN_ID=55
+export ROS_DOMAIN_ID=2
 export ROS_LOCALHOST_ONLY=0
-export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
-export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 
 unset ROS_DISCOVERY_SERVER
-unset CYCLONEDDS_URI
+export CYCLONEDDS_URI=file:///home/user/joint_controller/cyclonedds.xml
 unset FASTRTPS_DEFAULT_PROFILES_FILE
 unset FASTDDS_DEFAULT_PROFILES_FILE
 ```
@@ -394,10 +398,8 @@ src/robot_lower_gateway/config/erobot_v1.yaml
 运行时建议使用独立配置：
 
 ```bash
-sudo install -d -m 0755 /etc/robot-lower-gateway
 sudo install -m 0644 \
   /home/user/joint_controller/install/robot_lower_gateway/share/robot_lower_gateway/config/erobot_v1.yaml \
-  /etc/robot-lower-gateway/robot.yaml
 ```
 
 配置根节点必须保持：
@@ -458,15 +460,14 @@ cd /home/user/joint_controller
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 
-export ROS_DOMAIN_ID=55
+export ROS_DOMAIN_ID=2
 export ROS_LOCALHOST_ONLY=0
-export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
-export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
-unset ROS_DISCOVERY_SERVER CYCLONEDDS_URI
+export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+unset ROS_DISCOVERY_SERVER
+export CYCLONEDDS_URI=file:///home/user/joint_controller/cyclonedds.xml
 unset FASTRTPS_DEFAULT_PROFILES_FILE FASTDDS_DEFAULT_PROFILES_FILE
 
-ros2 launch robot_lower_gateway lower_gateway.launch.py \
-  config_file:=/etc/robot-lower-gateway/robot.yaml
+ros2 launch robot_lower_gateway lower_gateway.launch.py
 ```
 
 另开终端检查：
@@ -524,24 +525,19 @@ EtherCAT 和电机不会自动上电。安装脚本还会停用可能产生重�
 运行配置：
 
 ```text
-/etc/robot-lower-gateway/robot.yaml
-/etc/robot-lower-gateway/gateway.env
 ```
 
-首次安装生成的 `gateway.env` 应为：
 
 ```ini
 GATEWAY_OVERLAY_SETUP=/home/user/joint_controller/install/setup.bash
-ROBOT_GATEWAY_CONFIG=/etc/robot-lower-gateway/robot.yaml
-ROS_DOMAIN_ID=55
+ROS_DOMAIN_ID=2
 ROS_LOCALHOST_ONLY=0
-RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 FASTDDS_BUILTIN_TRANSPORTS=UDPv4
 ROBOT_GATEWAY_ENABLE_COMMAND_PROXY=false
 ROBOT_GATEWAY_COMMAND_PROXY_PREFIX=~/
 ```
 
-安装脚本会保留已有 `gateway.env`，更新代码后不会自动覆盖已审核的 proxy 设置。
 
 检查自启动策略：
 
@@ -573,9 +569,8 @@ sudo reboot
 ```bash
 source /opt/ros/humble/setup.bash
 source /home/user/joint_controller/install/setup.bash
-export ROS_DOMAIN_ID=55 ROS_LOCALHOST_ONLY=0
-export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
-export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+export ROS_DOMAIN_ID=2 ROS_LOCALHOST_ONLY=0
+export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 
 ros2 node list --no-daemon --spin-time 5
 ros2 topic echo /workspace/status \
@@ -594,13 +589,11 @@ ros2 topic echo /workspace/status \
 创建环境文件：
 
 ```ini
-# /etc/robot-lower-gateway/gateway.env
 ROBOT_UNDERLAY_SETUP=/home/robot/target_robot_ws/install/setup.bash
 GATEWAY_OVERLAY_SETUP=/opt/robot_lower_gateway_ws/install/setup.bash
-ROBOT_GATEWAY_CONFIG=/etc/robot-lower-gateway/robot.yaml
-ROS_DOMAIN_ID=55
+ROS_DOMAIN_ID=2
 ROS_LOCALHOST_ONLY=0
-RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 FASTDDS_BUILTIN_TRANSPORTS=UDPv4
 ROBOT_GATEWAY_ENABLE_COMMAND_PROXY=false
 ROBOT_GATEWAY_COMMAND_PROXY_PREFIX=~/
@@ -636,7 +629,6 @@ sudo systemctl enable --now robot-lower-gateway.service
 ROBOT_GATEWAY_ENABLE_COMMAND_PROXY=true
 ```
 
-写入 `/etc/robot-lower-gateway/gateway.env`，然后：
 
 ```bash
 sudo systemctl restart robot-lower-gateway.service
@@ -678,7 +670,7 @@ service 不存在时代理必须失败，不能返回伪成功。REAL 首次验�
 
 ### 13.1 新上位机准备
 
-1. 安装与现系统兼容的 Ubuntu、ROS 2 Humble 和 `rmw_fastrtps_cpp`。
+1. 安装与现系统兼容的 Ubuntu、ROS 2 Humble 和 `rmw_cyclonedds_cpp`。
 2. 将控制网口设为 `192.168.2.10/24`，确认旧上位机已断开。
 3. 部署上位机独立工作空间，例如 `/home/<user>/robot_gateway_ws`。
 4. 编译并 source 上位机 workspace。
@@ -877,7 +869,7 @@ robotctl down
 ### 16.1 能 ping，但看不到 ROS 节点
 
 ```bash
-printenv | grep -E 'ROS_DOMAIN_ID|ROS_LOCALHOST_ONLY|RMW_IMPLEMENTATION|FASTDDS'
+printenv | grep -E 'ROS_DOMAIN_ID|ROS_LOCALHOST_ONLY|RMW_IMPLEMENTATION|CYCLONEDDS_URI'
 ros2 node list --no-daemon --spin-time 5
 sudo ufw status
 ip link show enp8s0
@@ -920,7 +912,6 @@ sudo journalctl -u robot-lower-gateway.service -n 150 --no-pager
 
 ```bash
 systemctl cat robot-lower-gateway.service
-sudo cat /etc/robot-lower-gateway/gateway.env
 ros2 pkg prefix robot_lower_gateway
 readlink -f /proc/$(pgrep -n robot_lower_gateway_node)/exe
 ```

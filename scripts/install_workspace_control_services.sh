@@ -4,14 +4,13 @@ set -euo pipefail
 WORKSPACE_ROOT=/home/user/joint_controller
 SYSTEMD_DIR=/etc/systemd/system
 GATEWAY_SHARE="${WORKSPACE_ROOT}/install/robot_lower_gateway/share/robot_lower_gateway"
+LIFT_SHARE="${WORKSPACE_ROOT}/install/joint_hardware/share/joint_hardware"
 GATEWAY_TEMPLATE="${GATEWAY_SHARE}/systemd/robot-lower-gateway.service.in"
 GATEWAY_RUNNER="${WORKSPACE_ROOT}/install/robot_lower_gateway/lib/robot_lower_gateway/run_gateway.sh"
-GATEWAY_CONFIG_SOURCE="${GATEWAY_SHARE}/config/erobot_v1.yaml"
-GATEWAY_CONFIG_DIR=/etc/robot-lower-gateway
-GATEWAY_ENV_FILE="${GATEWAY_CONFIG_DIR}/gateway.env"
 
 if [[ ! -f "${GATEWAY_TEMPLATE}" || ! -x "${GATEWAY_RUNNER}" ||
-  ! -f "${GATEWAY_CONFIG_SOURCE}" ]]; then
+  ! -f "${GATEWAY_SHARE}/config/erobot_v1.yaml" ||
+  ! -f "${LIFT_SHARE}/config/lift_hardware.yaml" ]]; then
   echo "robot_lower_gateway is not built; build it before installing workspace services." >&2
   exit 1
 fi
@@ -41,42 +40,6 @@ sudo install -m 0644 \
 sudo install -m 0644 \
   "${WORKSPACE_ROOT}/systemd/hardware-server.service" \
   "${SYSTEMD_DIR}/hardware-server.service"
-
-sudo install -d -m 0755 "${GATEWAY_CONFIG_DIR}"
-sudo install -m 0644 "${GATEWAY_CONFIG_SOURCE}" \
-  "${GATEWAY_CONFIG_DIR}/robot.yaml"
-
-# Preserve an existing gateway.env, including an explicitly reviewed proxy
-# setting. A new deployment is read-only by default until the native services
-# have been verified.
-if [[ ! -f "${GATEWAY_ENV_FILE}" ]]; then
-  printf '%s\n' \
-    "GATEWAY_OVERLAY_SETUP=${WORKSPACE_ROOT}/install/setup.bash" \
-    "ROBOT_GATEWAY_CONFIG=${GATEWAY_CONFIG_DIR}/robot.yaml" \
-    "ROS_DOMAIN_ID=2" \
-    "ROS_LOCALHOST_ONLY=0" \
-    "RMW_IMPLEMENTATION=rmw_cyclonedds_cpp" \
-    "CYCLONEDDS_URI=file:///home/user/joint_controller/cyclonedds.xml" \
-    "ROBOT_GATEWAY_CONTROL_INTERFACE=enp8s0" \
-    "ROBOT_GATEWAY_CONTROL_IPV4=192.168.2.20" \
-    "ROBOT_GATEWAY_NETWORK_WAIT_TIMEOUT_SEC=0" \
-    "ROBOT_GATEWAY_ENABLE_COMMAND_PROXY=false" \
-    "ROBOT_GATEWAY_COMMAND_PROXY_PREFIX=~/" | \
-    sudo tee "${GATEWAY_ENV_FILE}" >/dev/null
-fi
-
-# Older installations may predate the dedicated-control-interface gate. Keep
-# reviewed proxy settings intact while adding only missing network keys.
-ensure_gateway_env() {
-  local key="$1"
-  local value="$2"
-  if ! sudo grep -q "^${key}=" "${GATEWAY_ENV_FILE}"; then
-    printf '%s=%s\n' "${key}" "${value}" | sudo tee -a "${GATEWAY_ENV_FILE}" >/dev/null
-  fi
-}
-ensure_gateway_env ROBOT_GATEWAY_CONTROL_INTERFACE enp8s0
-ensure_gateway_env ROBOT_GATEWAY_CONTROL_IPV4 192.168.2.20
-ensure_gateway_env ROBOT_GATEWAY_NETWORK_WAIT_TIMEOUT_SEC 0
 
 GATEWAY_GROUP="$(id -gn user)"
 TEMP_GATEWAY_UNIT="$(mktemp)"

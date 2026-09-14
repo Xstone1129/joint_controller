@@ -48,23 +48,17 @@ GATEWAY_LOG_ROOT="${JUNIOR_GATEWAY_LOG_ROOT:-${HOME}/.ros/log/gateway}"
 mkdir -p "${GATEWAY_LOG_ROOT}"
 export ROS_LOG_DIR="${GATEWAY_LOG_ROOT}"
 
-export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-55}"
+export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-2}"
 export ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY:-0}"
-export RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}"
-export FASTDDS_BUILTIN_TRANSPORTS="${FASTDDS_BUILTIN_TRANSPORTS:-UDPv4}"
+export RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}"
 unset ROS_DISCOVERY_SERVER
-unset CYCLONEDDS_URI
+export CYCLONEDDS_URI="${CYCLONEDDS_URI:-file:///home/user/joint_controller/cyclonedds.xml}"
 unset FASTRTPS_DEFAULT_PROFILES_FILE
 unset FASTDDS_DEFAULT_PROFILES_FILE
 
 CONFIG_ARGUMENT=()
-if [[ -n "${ROBOT_GATEWAY_CONFIG:-}" ]]; then
-  if [[ ! -f "${ROBOT_GATEWAY_CONFIG}" ]]; then
-    echo "Gateway config not found: ${ROBOT_GATEWAY_CONFIG}" >&2
-    exit 1
-  fi
-  CONFIG_ARGUMENT=(config_file:="${ROBOT_GATEWAY_CONFIG}")
-fi
+# Configuration is always resolved by lower_gateway.launch.py from this
+# workspace's installed package share. There is deliberately no /etc override.
 
 if [[ -n "${ROBOT_GATEWAY_ENABLE_COMMAND_PROXY:-}" ]]; then
   CONFIG_ARGUMENT+=(enable_command_proxy:="${ROBOT_GATEWAY_ENABLE_COMMAND_PROXY}")

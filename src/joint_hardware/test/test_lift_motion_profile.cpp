@@ -8,7 +8,7 @@
 namespace
 {
 
-constexpr double kMaxVelocityMps = 0.080;
+constexpr double kMaxVelocityMps = 0.060;
 constexpr double kMaxAccelerationMps2 = 0.033333333;
 
 joint_hardware::lift::LiftMotionProfile configured_profile()
@@ -36,7 +36,7 @@ TEST(LiftMotionProfile, RejectsMissingOrInvalidLimits)
 
   limits.min_position_m = -1.0;
   limits.max_position_m = 0.0;
-  limits.max_velocity_mps = 0.080;
+  limits.max_velocity_mps = 0.060;
   limits.max_acceleration_mps2 = 0.033333333;
   limits.max_jerk_mps3 = 0.4;
   limits.default_velocity_scale = 0.80;

@@ -35,8 +35,8 @@ hardware_interface::HardwareInfo make_lift_hardware_info(
     {"command_units_per_rev", "10000"},
     {"position_min_m", "-1.0"},
     {"position_max_m", "0.0"},
-    {"max_rpm", "1440"},
-    {"max_feedback_velocity_mps", "0.080"},
+    {"max_rpm", "1080"},
+    {"max_feedback_velocity_mps", "0.060"},
     {"brake_control_enabled", "true"},
     {"brake_release_wait_ms", "0"},
     {"zero_offset_file", "/tmp/joint_hardware_mock_safety_zero.cfg"},
@@ -515,40 +515,11 @@ TEST(MockLiftHardware, RunsRos2ControlReadWriteAt100Hz)
   auto backend = std::make_unique<joint_hardware::lift::MockLiftEthercatBackend>();
   auto * backend_view = backend.get();
   joint_hardware::LiftHardware hardware(std::move(backend));
-  hardware_interface::HardwareInfo info;
-  info.type = "system";
-  info.hardware_parameters = {
-    {"ethercat_backend", "mock"},
-    {"ethercat_cycle_ms", "10"},
-    {"expected_working_counter", "1"},
-    {"slave_alias", "0"},
-    {"slave_position", "0"},
-    {"motor_id", "LVM08008H3G3-M17"},
-    {"lead_mm_per_rev", "3.333333333"},
-    {"lift_sign", "-1.0"},
-    {"command_units_per_rev", "10000"},
-    {"brake_control_enabled", "true"},
-    {"brake_release_wait_ms", "0"},
+  auto info = make_lift_hardware_info({
     {"lift_startup_motion_guard_enabled", "false"},
     {"reset_velocity_debug_enabled", "true"},
     {"zero_offset_file", "/tmp/joint_hardware_mock_integration_zero.cfg"},
-  };
-  hardware_interface::ComponentInfo joint;
-  joint.name = "joint_motor";
-  for (const char * name :
-    {"position", "velocity", "status", "error_code", "mode", "brake_unlocked",
-      "digital_inputs", "power_enable"})
-  {
-    hardware_interface::InterfaceInfo interface;
-    interface.name = name;
-    joint.state_interfaces.push_back(interface);
-  }
-  for (const char * name : {"position", "velocity", "acceleration", "power_enable"}) {
-    hardware_interface::InterfaceInfo interface;
-    interface.name = name;
-    joint.command_interfaces.push_back(interface);
-  }
-  info.joints.push_back(joint);
+  });
 
   ASSERT_EQ(hardware.on_init(info), hardware_interface::CallbackReturn::SUCCESS);
   ASSERT_EQ(
@@ -1008,36 +979,10 @@ TEST(MockLiftHardware, QuickStopDeadlineForcesDisable)
   backend_view->set_quick_stop_velocity_units(20000);
   backend_view->set_brake_p06_14_ms(1);
   joint_hardware::LiftHardware hardware(std::move(backend));
-  hardware_interface::HardwareInfo info;
-  info.type = "system";
-  info.hardware_parameters = {
-    {"ethercat_backend", "mock"},
-    {"ethercat_cycle_ms", "10"},
-    {"expected_working_counter", "1"},
-    {"slave_alias", "0"},
-    {"slave_position", "0"},
-    {"motor_id", "LVM08008H3G3-M17"},
-    {"lead_mm_per_rev", "3.333333333"},
-    {"lift_sign", "-1.0"},
-    {"command_units_per_rev", "10000"},
-    {"brake_control_enabled", "true"},
-    {"brake_release_wait_ms", "0"},
+  auto info = make_lift_hardware_info({
     {"brake_p06_14_ms", "1"},
     {"zero_offset_file", "/tmp/joint_hardware_mock_quick_stop_zero.cfg"},
-  };
-  hardware_interface::ComponentInfo joint;
-  joint.name = "joint_motor";
-  for (const char * name : {"position", "velocity", "status", "error_code", "mode",
-      "brake_unlocked", "digital_inputs"})
-  {
-    hardware_interface::InterfaceInfo interface;
-    interface.name = name;
-    joint.state_interfaces.push_back(interface);
-  }
-  hardware_interface::InterfaceInfo position_command;
-  position_command.name = "position";
-  joint.command_interfaces.push_back(position_command);
-  info.joints.push_back(joint);
+  });
 
   ASSERT_EQ(hardware.on_init(info), hardware_interface::CallbackReturn::SUCCESS);
   ASSERT_EQ(
@@ -1104,35 +1049,10 @@ TEST(MockLiftHardware, BrakeControlDisabledNeverRequestsOperationEnabled)
   auto backend = std::make_unique<joint_hardware::lift::MockLiftEthercatBackend>();
   auto * backend_view = backend.get();
   joint_hardware::LiftHardware hardware(std::move(backend));
-  hardware_interface::HardwareInfo info;
-  info.type = "system";
-  info.hardware_parameters = {
-    {"ethercat_backend", "mock"},
-    {"ethercat_cycle_ms", "10"},
-    {"expected_working_counter", "1"},
-    {"slave_alias", "0"},
-    {"slave_position", "0"},
-    {"motor_id", "LVM08008H3G3-M17"},
-    {"lead_mm_per_rev", "3.333333333"},
-    {"lift_sign", "-1.0"},
-    {"command_units_per_rev", "10000"},
+  auto info = make_lift_hardware_info({
     {"brake_control_enabled", "false"},
-    {"brake_release_wait_ms", "0"},
     {"zero_offset_file", "/tmp/joint_hardware_mock_brake_disabled_zero.cfg"},
-  };
-  hardware_interface::ComponentInfo joint;
-  joint.name = "joint_motor";
-  for (const char * name : {"position", "velocity", "status", "error_code", "mode",
-      "brake_unlocked", "digital_inputs"})
-  {
-    hardware_interface::InterfaceInfo interface;
-    interface.name = name;
-    joint.state_interfaces.push_back(interface);
-  }
-  hardware_interface::InterfaceInfo position_command;
-  position_command.name = "position";
-  joint.command_interfaces.push_back(position_command);
-  info.joints.push_back(joint);
+  });
 
   ASSERT_EQ(hardware.on_init(info), hardware_interface::CallbackReturn::SUCCESS);
   ASSERT_EQ(
@@ -1201,37 +1121,11 @@ TEST(MockLiftHardware, ConfiguredNegativeLimitStopsOnlyNegativeMotion)
   auto * backend_view = backend.get();
   backend_view->set_digital_inputs(1U << 0U);
   joint_hardware::LiftHardware hardware(std::move(backend));
-  hardware_interface::HardwareInfo info;
-  info.type = "system";
-  info.hardware_parameters = {
-    {"ethercat_backend", "mock"},
-    {"ethercat_cycle_ms", "10"},
-    {"expected_working_counter", "1"},
-    {"slave_alias", "0"},
-    {"slave_position", "0"},
-    {"motor_id", "LVM08008H3G3-M17"},
-    {"lead_mm_per_rev", "3.333333333"},
-    {"lift_sign", "-1.0"},
-    {"command_units_per_rev", "10000"},
-    {"brake_control_enabled", "true"},
-    {"brake_release_wait_ms", "0"},
+  auto info = make_lift_hardware_info({
     {"limit_switch_enabled", "true"},
     {"limit_switch_negative_bit", "0"},
     {"zero_offset_file", "/tmp/joint_hardware_mock_limit_zero.cfg"},
-  };
-  hardware_interface::ComponentInfo joint;
-  joint.name = "joint_motor";
-  for (const char * name : {"position", "velocity", "status", "error_code", "mode",
-      "brake_unlocked", "digital_inputs"})
-  {
-    hardware_interface::InterfaceInfo interface;
-    interface.name = name;
-    joint.state_interfaces.push_back(interface);
-  }
-  hardware_interface::InterfaceInfo position_command;
-  position_command.name = "position";
-  joint.command_interfaces.push_back(position_command);
-  info.joints.push_back(joint);
+  });
 
   ASSERT_EQ(hardware.on_init(info), hardware_interface::CallbackReturn::SUCCESS);
   ASSERT_EQ(

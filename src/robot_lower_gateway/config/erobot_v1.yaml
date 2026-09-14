@@ -22,29 +22,10 @@ ubuntu_lower_gateway:
       # Controllers treat the retransmit as an idempotent ACK request.
       controller_ack_retry_interval_ms: 50
       service_timeout_ms: 5000
-      # Lease preparation powers only the lift drive to Operation Enabled and
-      # waits for feedback. The first command remains a zero-velocity HOLD.
-      lift_enable_timeout_ms: 1000
       arm_max_velocity_rad_s: 0.3
       # Match the established native joint-batch safety limit.  Heavy V1
       # validates every feedforward value before forwarding it.
       arm_max_acceleration_rad_s2: 1.0
-      lift_min_position_m: -1.0
-      lift_max_position_m: 0.0
-      # Encoder noise around the mechanical upper/lower stops is tolerated
-      # only for safety HOLD/STOP targets; motion targets remain strict.
-      lift_position_tolerance_m: 0.002
-      lift_max_velocity_mps: 0.060
-      lift_max_acceleration_mps2: 0.10
-      # Disabled arms may coexist with lift motion only when each arm target
-      # explicitly holds its measured position with zero velocity/acceleration.
-      allow_lift_only_follow: true
-      lift_only_arm_hold_position_tolerance_rad: 0.001
-      lift_native_name: joint_motor
-      # The Heavy gateway only sends this native lock/unlock service on a
-      # mode/lease safety edge; 100 Hz HOLD keepalives never call it.
-      heavy_lift_brake_native_service: /lift_brake_command
-      brake_lock_velocity_threshold_mps: 0.001
       arm_native_names:
         - ljoint1
         - ljoint2
@@ -61,9 +42,14 @@ ubuntu_lower_gateway:
         - rjoint6
         - rjoint7
 
-    # The gateway is feedback-only by default. Enable this only after the
-    # native Ubuntu control services have been verified in this workspace.
-    enable_command_proxy: false
+    # The gateway is feedback-only unless the namespaced proxies are required.
+    # The Junior upper Heavy REAL runtime requires them: its planner Gateway
+    # calls /ubuntu_lower_gateway/lift/set_power (plus lift command/stop/hold
+    # and the arm power/mode/joint/cartesian proxies) and fails closed when they
+    # are absent, so `lift power on` and Heavy activation would abort
+    # ros2_control_node on the upper computer. The native services remain the
+    # only owners; the proxy only adds /ubuntu_lower_gateway/* entry points.
+    enable_command_proxy: true
     command_proxy_prefix: "~/"
 
     # These are existing service owners in the target robot workspace. The
@@ -75,25 +61,12 @@ ubuntu_lower_gateway:
       joint_absolute: /arm_absolute_control
       cartesian_increment: /cartesian_increment_control
       cartesian_absolute: /cartesian_absolute_control
-      lift_power: /lift_brake_command
-      lift_command: /joint/lift/command
-      lift_stop: /joint/lift/stop
-      lift_hold: /joint/lift/hold
-      lift_set_drive_zero: /lift_set_drive_zero
 
     command_timeout_ms:
       power: 30000
       mode: 5000
       joint: 30000
       cartesian: 60000
-      lift_power: 30000
-      lift_command: 5000
-      lift_safety: 5000
-      lift_set_drive_zero: 10000
-
-    lift:
-      canonical_joint_name: joint_motor
-      native_joint_name: joint_motor
 
     canonical_joint_names:
       - ljoint1
@@ -137,9 +110,6 @@ ubuntu_lower_gateway:
       tcp_pose: /arm_tcp_pose
       execution_status: /arm_cartesian_path_execution_status
       workspace_status: /workspace/status
-      lift_driver_status: /joint/lift/driver_status
-      lift_control_status: /joint/lift/control_status
-      lift_joint_state: /lift/joint_states
 
     # Vendor-specific values stay in the adapter profile, not the gateway.
     drive_status:
@@ -153,5 +123,3 @@ ubuntu_lower_gateway:
       motion_status: 500
       tcp_pose: 500
       execution: 3000
-      lift_status: 500
-      lift_joint_state: 500

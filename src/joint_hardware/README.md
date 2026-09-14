@@ -59,7 +59,7 @@ The lift uses CSV (`6060h=9`, confirmed by `6061h=9`) and the following PDOs:
 conversion uses the validated 6091/6092 feed ratio, a 10 mm/rev screw, the 3:1
 reduction, and `lift_sign=-1`; the effective carriage travel is 3.333333333
 mm/rev at the motor. The 17-bit encoder count (`131072`) is not used as the
-60FFh unit. The mechanical velocity limit is 1440 rpm (0.080 m/s), and
+60FFh unit. The mechanical velocity limit is 1080 rpm (0.060 m/s), and
 software limits are `[-1.0, 0.0] m`.
 The effective command units/rev follow the manual: nonzero `2008h(P00.08)` wins;
 otherwise `6092:01` wins when it differs from `608F:01`, and `6091:01/02` is used
@@ -173,7 +173,7 @@ writes `joint_motor/power_enable` through ros2_control. `/lift_brake_command`
 remains a compatibility and safety entry point; an external disable is latched
 and cannot be overwritten by a command that was already high. A new false-to-
 true command edge is required before re-enable. A position command is still
-clamped to `[-1.0, 0.0] m` and the outer loop never exceeds 1440 rpm (0.080 m/s).
+clamped to `[-1.0, 0.0] m` and the outer loop never exceeds 1080 rpm (0.060 m/s).
 
 The launch file exposes the validated unit and safety values directly. If the
 drive reports a command-unit value other than 10000, pass the confirmed value
@@ -206,7 +206,7 @@ The nominal limits are:
 | effective carriage travel | 3.333333333 | mm/rev |
 | `lift_sign` | -1 | dimensionless |
 | motor speed | 1440 | rpm |
-| linear velocity | 0.080 | m/s |
+| linear velocity | 0.060 | m/s |
 | Ruckig acceleration | 0.033333333 | m/s^2 |
 | Ruckig jerk | 0.4 | m/s^3 |
 | default velocity scale | 0.80 | dimensionless |
@@ -225,7 +225,7 @@ ros2 service call /joint/lift/command robot_control_msg/srv/SelectedJointControl
 ```
 
 `vel` selects a per-command velocity scale but never exceeds the configured
-0.080 m/s mechanical limit. A positive `acc` can tighten, but never raise, the
+0.060 m/s mechanical limit. A positive `acc` can tighten, but never raise, the
 global 0.033333333 m/s^2 acceleration limit; jerk remains bounded by the controller
 YAML. A `JointTrajectory` for `joint_motor` is accepted on
 `/joint/lift/trajectory`; streaming `JointTrajectoryPoint` targets use

@@ -102,12 +102,11 @@ cd /home/user/joint_controller
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 
-export ROS_DOMAIN_ID=55
+export ROS_DOMAIN_ID=2
 export ROS_LOCALHOST_ONLY=0
-export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
-export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 unset ROS_DISCOVERY_SERVER
-unset CYCLONEDDS_URI
+export CYCLONEDDS_URI=file:///home/user/joint_controller/cyclonedds.xml
 unset FASTRTPS_DEFAULT_PROFILES_FILE
 
 ros2 launch robot_lower_gateway lower_gateway.launch.py
@@ -205,8 +204,9 @@ source /opt/robot_lower_gateway_ws/install/setup.bash
 |---|---|
 | `ROBOT_UNDERLAY_SETUP` | 目标机器人工作空间的 `setup.bash` |
 | `GATEWAY_OVERLAY_SETUP` | 网关工作空间的 `setup.bash` |
-| `ROBOT_GATEWAY_CONFIG` | 当前机器人的 YAML 绝对路径 |
-| `ROS_DOMAIN_ID` | 默认 `55` |
+| `ROS_DOMAIN_ID` | 默认 `2` |
+
+网关配置固定读取工作区 install/share；不再支持系统级配置副本或外部路径覆盖。
 
 `systemd/robot-lower-gateway.service.in` 是部署模板。安装时必须将 `@GATEWAY_RUNNER@` 替换为已安装 `run_gateway.sh` 的绝对路径。模板默认不安装、不 enable，避免改变现有开机行为。
 

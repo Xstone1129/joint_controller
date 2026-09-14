@@ -8,8 +8,11 @@ Type=simple
 User=@ROBOT_USER@
 Group=@ROBOT_GROUP@
 WorkingDirectory=@GATEWAY_WORKSPACE@
-EnvironmentFile=-/etc/robot-lower-gateway/gateway.env
 Environment=JUNIOR_RUNTIME_LOG_USER=@ROBOT_USER@
+Environment=ROS_DOMAIN_ID=2
+Environment=ROS_LOCALHOST_ONLY=0
+Environment=RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+Environment=CYCLONEDDS_URI=file:///home/user/joint_controller/cyclonedds.xml
 ExecStart=@GATEWAY_RUNNER@
 Restart=on-failure
 RestartSec=2

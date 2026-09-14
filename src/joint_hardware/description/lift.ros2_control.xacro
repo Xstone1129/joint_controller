@@ -7,7 +7,7 @@
             ethercat_interface:=enp5s0 dc_assign_activate:=0 dc_sync0_shift_ns:=0
             command_units_per_rev:=10000 encoder_counts_per_rev:=131072
             lead_mm_per_rev:=3.333333333 lift_sign:=-1.0 position_min_m:=-1.0
-            position_max_m:=0.0 max_rpm:=1440 brake_control_enabled:=false
+            position_max_m:=0.0 max_rpm:=1080 brake_control_enabled:=false
             position_limit_recovery_max_rpm:=300
             limit_switch_enabled:=false limit_switch_positive_bit:=-1
             limit_switch_negative_bit:=-1 limit_switch_active_high:=true
@@ -30,13 +30,13 @@
         <param name="slave_vendor_id">${slave_vendor_id}</param>
         <param name="slave_product_code">${slave_product_code}</param>
         <param name="ethercat_interface">${ethercat_interface}</param>
-        <param name="pdo_rx_logical_address">0</param>
-        <param name="pdo_tx_logical_address">0</param>
-        <param name="pdo_rx_bytes">8</param>
-        <param name="pdo_tx_bytes">17</param>
+        <param name="pdo_rx_logical_address">${lift_cfg['pdo_rx_logical_address']}</param>
+        <param name="pdo_tx_logical_address">${lift_cfg['pdo_tx_logical_address']}</param>
+        <param name="pdo_rx_bytes">${lift_cfg['pdo_rx_bytes']}</param>
+        <param name="pdo_tx_bytes">${lift_cfg['pdo_tx_bytes']}</param>
         <param name="dc_assign_activate">${dc_assign_activate}</param>
         <param name="dc_sync0_shift_ns">${dc_sync0_shift_ns}</param>
-        <param name="motor_id">LVM08008H3G3-M17</param>
+        <param name="motor_id">${lift_cfg['motor_id']}</param>
         <param name="lead_mm_per_rev">${lift_cfg['lead_mm_per_rev']}</param>
         <param name="lift_sign">${lift_cfg['lift_sign']}</param>
         <param name="command_units_per_rev">${command_units_per_rev}</param>

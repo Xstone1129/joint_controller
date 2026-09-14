@@ -18,7 +18,7 @@
   <xacro:arg name="lift_sign" default="-1.0"/>
   <xacro:arg name="position_min_m" default="-1.0"/>
   <xacro:arg name="position_max_m" default="0.0"/>
-  <xacro:arg name="max_rpm" default="1440"/>
+  <xacro:arg name="max_rpm" default="1080"/>
   <xacro:arg name="position_limit_recovery_max_rpm" default="300"/>
   <xacro:arg name="brake_control_enabled" default="false"/>
   <xacro:arg name="limit_switch_enabled" default="false"/>

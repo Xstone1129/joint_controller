@@ -1,5 +1,8 @@
 # robot_lower_gateway 下位机部署与使用
 
+配置来源约束：网关只读取当前 `joint_controller` 工作区安装资源；不得创建系统级配置副本、
+环境文件或外部路径覆盖。所有升降参数统一维护在 `src/joint_hardware/config/lift_hardware.yaml`。
+
 从静态 IP、ROS 2/DDS、独立 overlay、systemd 自启动到更换上位机电脑的完整操作手册见
 [`docs/deployment.md`](docs/deployment.md)。
 
@@ -130,7 +133,7 @@ ROS package 名为 `robot_lower_gateway`，Ubuntu 运行节点名为 `/ubuntu_lo
 ```text
 Ubuntu 22.04
 ROS 2 Humble
-RMW: rmw_fastrtps_cpp
+RMW: rmw_cyclonedds_cpp
 ROS_DOMAIN_ID: 55
 ```
 
@@ -272,13 +275,7 @@ config/erobot_v1.yaml
 
 建议不要直接覆盖模板，复制为新机器人配置：
 
-```bash
-sudo mkdir -p /etc/robot-lower-gateway
-sudo cp \
-  /opt/robot_lower_gateway_ws/src/robot_lower_gateway/config/erobot_v1.yaml \
-  /etc/robot-lower-gateway/robot.yaml
-sudo chmod 0644 /etc/robot-lower-gateway/robot.yaml
-```
+网关不支持外部配置路径；修改 profile 后必须在工作区源码中完成并重新构建。
 
 配置根节点必须与运行节点一致：
 
@@ -406,16 +403,14 @@ source /opt/ros/humble/setup.bash
 source /home/robot/target_robot_ws/install/setup.bash
 source /opt/robot_lower_gateway_ws/install/setup.bash
 
-export ROS_DOMAIN_ID=55
+export ROS_DOMAIN_ID=2
 export ROS_LOCALHOST_ONLY=0
-export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
-export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 unset ROS_DISCOVERY_SERVER
-unset CYCLONEDDS_URI
+export CYCLONEDDS_URI=file:///home/user/joint_controller/cyclonedds.xml
 unset FASTRTPS_DEFAULT_PROFILES_FILE
 
-ros2 launch robot_lower_gateway lower_gateway.launch.py \
-  config_file:=/etc/robot-lower-gateway/robot.yaml
+ros2 launch robot_lower_gateway lower_gateway.launch.py
 ```
 
 启动日志应包含：
@@ -577,15 +572,14 @@ source /opt/ros/humble/setup.bash
 source /home/robot/target_robot_ws/install/setup.bash
 source /opt/robot_lower_gateway_ws/install/setup.bash
 
-export ROS_DOMAIN_ID=55
+export ROS_DOMAIN_ID=2
 export ROS_LOCALHOST_ONLY=0
-export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 unset ROS_DISCOVERY_SERVER
-unset CYCLONEDDS_URI
+export CYCLONEDDS_URI=file:///home/user/joint_controller/cyclonedds.xml
 unset FASTRTPS_DEFAULT_PROFILES_FILE
 
 ros2 launch robot_lower_gateway lower_gateway.launch.py \
-  config_file:=/etc/robot-lower-gateway/robot.yaml \
   enable_command_proxy:=true
 ```
 
@@ -643,21 +637,17 @@ diagnostics 会保持 `waiting`。如果 systemd 配置启用了 command proxy�
 ### 12.1 安装配置
 
 ```bash
-sudo mkdir -p /etc/robot-lower-gateway
 sudo install -m 0644 \
   /opt/robot_lower_gateway_ws/src/robot_lower_gateway/config/erobot_v1.yaml \
-  /etc/robot-lower-gateway/robot.yaml
 ```
 
-创建 `/etc/robot-lower-gateway/gateway.env`：
 
 ```ini
 ROBOT_UNDERLAY_SETUP=/home/robot/target_robot_ws/install/setup.bash
 GATEWAY_OVERLAY_SETUP=/opt/robot_lower_gateway_ws/install/setup.bash
-ROBOT_GATEWAY_CONFIG=/etc/robot-lower-gateway/robot.yaml
-ROS_DOMAIN_ID=55
+ROS_DOMAIN_ID=2
 ROS_LOCALHOST_ONLY=0
-RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 FASTDDS_BUILTIN_TRANSPORTS=UDPv4
 # 默认不设置；只有完成仿真验收后才显式设置 true
 # ROBOT_GATEWAY_ENABLE_COMMAND_PROXY=true
@@ -667,7 +657,6 @@ FASTDDS_BUILTIN_TRANSPORTS=UDPv4
 权限：
 
 ```bash
-sudo chmod 0644 /etc/robot-lower-gateway/gateway.env
 ```
 
 ### 12.2 生成 unit
