@@ -59,8 +59,13 @@ add_executable(planner_input_publisher_ubuntu
   src/planner_input_publisher_ubuntu.cpp
 )
 
+# The supervisor is split by theme; the file list must stay in sync with the
+# implementation notes in include/robot_control/workspace_supervisor_ubuntu.hpp.
 add_executable(workspace_supervisor_ubuntu
   src/workspace_supervisor_ubuntu.cpp
+  src/workspace_supervisor_systemd.cpp
+  src/workspace_supervisor_probe.cpp
+  src/workspace_supervisor_readiness.cpp
 )
 
 target_include_directories(workspace_supervisor_ubuntu PRIVATE include)

@@ -2,6 +2,7 @@
 #define JOINT_HARDWARE__LIFT_HARDWARE_HPP_
 
 #include <atomic>
+#include <future>
 #include <chrono>
 #include <cstdint>
 #include <limits>
@@ -102,6 +103,18 @@ private:
     const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
     std::shared_ptr<std_srvs::srv::Trigger::Response> response);
   void handle_set_drive_zero(
+    const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
+    std::shared_ptr<std_srvs::srv::Trigger::Response> response);
+  // Read-only object-dictionary diagnostics (see handle_read_drive_objects).
+  //
+  // The IGH backend uploads SDOs with ecrt_master_sdo_upload(), which blocks
+  // until the master services the request.  While the realtime cycle owns the
+  // master that can take arbitrarily long, so the read runs on a worker and the
+  // service answers with a bounded timeout instead of hanging its caller.  At
+  // most one read is in flight; a stuck one is never retried concurrently.
+  std::shared_ptr<std::future<std::string>> sdo_read_future_;
+  std::string read_drive_objects_text();
+  void handle_read_drive_objects(
     const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
     std::shared_ptr<std_srvs::srv::Trigger::Response> response);
   bool wait_for_drive_stop(std::chrono::milliseconds timeout);
@@ -259,6 +272,11 @@ private:
   std::atomic<bool> recovery_exhausted_{false};
   std::atomic<uint32_t> mode_mismatch_cycles_{0};
   std::atomic<int32_t> zero_offset_units_atomic_{0};
+  // Bumped every time the lift coordinate frame moves underneath the
+  // command path (a host re-zero rewrites the drive origin).  Published in
+  // the driver status so LiftController can re-seat its own setpoint
+  // instead of chasing a target that belongs to the previous frame.
+  std::atomic<uint64_t> zero_generation_{0};
   std::atomic<int64_t> last_feedback_ns_{0};
   std::atomic<uint8_t> link_state_atomic_{
     static_cast<uint8_t>(lift::EthercatLinkState::offline)};
@@ -326,6 +344,7 @@ private:
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr reset_zero_service_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr home_service_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr drive_zero_service_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr read_drive_objects_service_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr drive_zero_alias_service_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr estop_service_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr safety_reset_service_;

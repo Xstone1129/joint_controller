@@ -25,9 +25,11 @@ if str(HARDWARE_DIR) not in sys.path:
 from ethercat_hardware_test import (  # noqa: E402
     AxisCommand,
     AxisFeedback,
+    BusVoltageMonitor,
     DesireRegion,
     RealRegion,
     SharedMemory,
+    arm_axis_master_positions,
     arm_axis_name,
     arm_feedback_ready,
     arm_rad_to_units,
@@ -256,6 +258,7 @@ class ArmWorker:
         self.blocked_direction: dict[int, int] = {}
         self.motion_watch_position: dict[int, int] = {}
         self.motion_watch_started: dict[int, float] = {}
+        self.bus_monitor: BusVoltageMonitor | None = None
 
     def _raise_if_start_cancelled(self) -> None:
         if self.stop_event.is_set():
@@ -343,6 +346,12 @@ class ArmWorker:
                 time.sleep(0.02)
             self._raise_if_start_cancelled()
             self._hold_locked()
+            # Read-only bus voltage / undervoltage limit reporting; forwarded to
+            # the upper console through GET_ARM_STATE.
+            self.bus_monitor = BusVoltageMonitor(
+                arm_axis_master_positions(self.config)
+            )
+            self.bus_monitor.start()
             self.thread = threading.Thread(target=self._loop, name="arm-worker", daemon=True)
             self.thread.start()
         except Exception:
@@ -483,6 +492,9 @@ class ArmWorker:
 
     def stop(self) -> None:
         self.stop_event.set()
+        if self.bus_monitor is not None:
+            self.bus_monitor.stop()
+            self.bus_monitor = None
         if self.thread is not None:
             self.thread.join(timeout=1.0)
         with self.lock:
@@ -527,6 +539,7 @@ class ArmWorker:
                 "enabled": self.enabled,
                 "power": bool(self.desire.ec_poweron) if self.desire is not None else False,
                 "axes": axes,
+                "bus": self.bus_monitor.snapshot() if self.bus_monitor is not None else {},
             }
 
 

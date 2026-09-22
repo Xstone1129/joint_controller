@@ -90,6 +90,18 @@ std_msgs::msg::String driver_status(
   return status;
 }
 
+// The same complete status the hardware sends, plus the coordinate-frame
+// generation it bumps on every re-zero.  The key is only emitted where the
+// hardware can actually report it, so older status producers keep working.
+std_msgs::msg::String driver_status_after_zero(long long zero_generation)
+{
+  std_msgs::msg::String status = driver_status(false);
+  status.data.insert(
+    status.data.size() - 1,
+    ",\"zero_generation\":" + std::to_string(zero_generation));
+  return status;
+}
+
 // A partial driver status so a test can degrade exactly one CiA 402 sub
 // condition and read back which one the controller blamed.
 std_msgs::msg::String partial_driver_status(
@@ -1224,6 +1236,21 @@ struct LiftRig
     }
   }
 
+  // Runs one cycle while the reported position is owned by the test instead
+  // of following the setpoint.  That is what a re-zero looks like from the
+  // controller: the same carriage is suddenly reported against a new origin,
+  // so the measured position steps while the carriage has not moved.
+  void run_frozen_cycle(int cycle)
+  {
+    EXPECT_EQ(
+      controller->update(
+        rclcpp::Time(static_cast<int64_t>(cycle) * 10'000'000LL, RCL_ROS_TIME),
+        rclcpp::Duration::from_nanoseconds(10'000'000)),
+      controller_interface::return_type::OK);
+    state_velocity = 0.0;
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+
   std::string status_text()
   {
     std::lock_guard<std::mutex> lock(status_mutex);
@@ -1493,6 +1520,64 @@ TEST(LiftController, IdleUnpoweredHoldDoesNotFaultOrWarn)
     EXPECT_NE(status.find("\"mode\":\"hold\""), std::string::npos);
     EXPECT_EQ(json_integer_field(status, "fault_total"), 0);
     EXPECT_EQ(capture.text().find("state=unready_sustained"), std::string::npos);
+  }
+}
+
+// `lift reset` homes the carriage against the upper limit switch and rewrites
+// the drive origin, and the host zero-offset path does the same for the ROS
+// coordinate.  Either way every position setpoint captured before the write is
+// expressed against the old state of the world.  LiftHardware turns the gap
+// between such a setpoint and the measured position into a velocity target the
+// moment the drive is enabled, which is the reported "run lift reset, then lift
+// power on, and the carriage dives to the old -0.4 target" failure.
+TEST(LiftController, ZeroFrameChangeReseatsTheRetainedSetpoint)
+{
+  RclcppScope rclcpp_scope;
+  {
+    LogCapture capture;
+    LiftRig rig(
+      "lift_zero_frame_test", "lift_zero_frame_test_io", {
+        rclcpp::Parameter("driver_status_timeout_sec", 5.0),
+        rclcpp::Parameter("brake_gate_stable_sec", 0.1),
+        rclcpp::Parameter("goal_tolerance_m", 0.001),
+        rclcpp::Parameter("target_stable_sec", 0.0),
+      });
+    ASSERT_TRUE(rig.ready);
+
+    // The generation is on the wire before the re-zero: a value seen for the
+    // first time is adopted, never mistaken for a frame change.
+    rig.status_publisher->publish(driver_status_after_zero(0));
+    int cycle = 0;
+    rig.run_cycles(cycle, 6);
+    cycle += 6;
+
+    ASSERT_TRUE(rig.send_position_command(-0.02, true));
+    for (int step = 0; step < 250 && rig.command_position > -0.1195; ++step) {
+      rig.run_cycle(cycle++);
+    }
+    const double parked_setpoint = rig.command_position;
+    ASSERT_LT(parked_setpoint, -0.115)
+      << "the retained setpoint has to sit away from the origin";
+
+    // The re-zero: the carriage now stands at the top of its travel and the
+    // drive reports it as 0.0, while the retained setpoint still says -0.12.
+    rig.state_position = 0.0;
+    rig.state_velocity = 0.0;
+    rig.status_publisher->publish(driver_status_after_zero(1));
+    for (int step = 0; step < 25; ++step) {
+      rig.run_frozen_cycle(cycle++);
+    }
+
+    EXPECT_NEAR(rig.command_position, 0.0, 1.0e-9)
+      << "the setpoint must be re-seated on the new frame, not left at "
+      << parked_setpoint;
+    const std::string status = rig.status_text();
+    EXPECT_EQ(json_integer_field(status, "zero_generation"), 1);
+    EXPECT_EQ(json_integer_field(status, "zero_resync_total"), 1);
+    EXPECT_NE(status.find("\"mode\":\"hold\""), std::string::npos);
+    EXPECT_NE(
+      capture.text().find("[LIFT_ZERO] state=setpoint_resynced"),
+      std::string::npos);
   }
 }
 

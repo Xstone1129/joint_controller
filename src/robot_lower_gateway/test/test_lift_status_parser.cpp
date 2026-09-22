@@ -105,6 +105,31 @@ TEST(LiftStatusParser, ParsesControllerState)
   EXPECT_FALSE(status.jog_active);
 }
 
+TEST(LiftStatusParser, ParsesControllerFaultReasonWhenPresent)
+{
+  // The lift controller publishes its newest latched fault as a top-level
+  // fault_reason.  The gateway falls back to it when the drive-side reason is
+  // empty, which is what keeps a controller-latched fault from being reported to
+  // the host with an empty reason.  The key is optional so controllers that do
+  // not publish it keep parsing.
+  std::string error;
+  robot_lower_gateway::LiftControlStatus status;
+  const std::string controller_json =
+    std::string("{\"mode\":\"fault\",\"trajectory_active\":false,\"jog_active\":false,") +
+    "\"fault_reason\":\"gate_lost_during_motion: entry_mode=streaming\"}";
+  ASSERT_TRUE(
+    robot_lower_gateway::parseLiftControlStatus(controller_json, status, error)) << error;
+  EXPECT_EQ(status.mode, "fault");
+  EXPECT_EQ(status.fault_reason, "gate_lost_during_motion: entry_mode=streaming");
+
+  robot_lower_gateway::LiftControlStatus legacy;
+  ASSERT_TRUE(
+    robot_lower_gateway::parseLiftControlStatus(
+      R"json({"mode":"hold","trajectory_active":false,"jog_active":false})json",
+      legacy, error)) << error;
+  EXPECT_TRUE(legacy.fault_reason.empty());
+}
+
 TEST(LiftStatusParser, RejectsNonFinitePosition)
 {
   robot_lower_gateway::LiftDriverStatus status;

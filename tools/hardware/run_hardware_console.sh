@@ -6,6 +6,10 @@ WORKSPACE_ROOT=$(cd -- "${SCRIPT_DIR}/../.." && pwd)
 export JUNIOR_RUNTIME_LOG_USER="${JUNIOR_RUNTIME_LOG_USER:-${SUDO_USER:-user}}"
 source "${WORKSPACE_ROOT}/scripts/runtime_log_env.sh"
 exec > >(tee -a "${SESSION_LOG_DIR}/console.log") 2>&1
+# stdout is a pipe here (not a tty), so Python block buffers it and the
+# interactive arm menu would stay invisible until the buffer fills or the
+# process exits.  Keep every diagnostic line visible as it is printed.
+export PYTHONUNBUFFERED=1
 TEST_TOOL="${SCRIPT_DIR}/ethercat_hardware_test.py"
 CONFIG="${SCRIPT_DIR}/hardware_io.yaml"
 ETHER_CAT_STARTED=0
@@ -14,10 +18,15 @@ usage() {
   echo "用法: sudo $0 [--check|--check-driver|--self-test|arm|lift]"
   echo "  无参数: 配置 Master0/1/2 后进入选择菜单"
   echo "  arm:    启动旧 IGH arm driver，交互测试 14 个 arm drive 的使能和点动"
-  echo "  lift:   启动现有 lift EtherCAT CSV CLI"
+  echo "  lift:   启动 lift EtherCAT 控制台（W/S/D/E/H/Z/Q）"
   echo "  --check:只读检查，不修改网卡或 EtherLab 配置"
   echo "  --check-driver:只检查 IGH driver 是否已运行"
   echo "  --self-test:只运行离线配置和 ABI 检查"
+  echo ""
+  echo "页面与按键与上位机 remote 控制台一致："
+  echo "  arm  总表: Up/Down 选择, Enter 进入, E 全部使能, D 全部失能, H 全部回零, Q 返回"
+  echo "  arm  关节: W/S 点动, D 失能, E 使能, H 回零, Q 返回"
+  echo "  lift     : W 上升, S 下降, D 失能, E 使能, H 回零, Z 置零, Q 返回"
 }
 
   if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
@@ -65,6 +74,9 @@ if [[ -z "${choice}" ]]; then
     "  1) Arm   左右手臂（Master0 + Master1）" \
     "  2) Lift  升降（Master2）" \
     "  q) 退出"
+  echo "  Arm  总表: Up/Down 选择, Enter 进入, E 全部使能, D 全部失能, H 全部回零, Q 返回"
+  echo "  Arm  关节: W/S 点动, D 失能, E 使能, H 回零, Q 返回"
+  echo "  Lift     : W 上升, S 下降, D 失能, E 使能, H 回零, Z 置零, Q 返回"
   read -r -p "选择: " choice
 fi
 if [[ $# -gt 0 ]]; then

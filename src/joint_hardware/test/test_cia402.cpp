@@ -20,6 +20,43 @@ Cia402Inputs healthy(uint16_t status)
   return inputs;
 }
 
+TEST(Cia402, RecognisesLatchedLd3mDriveFaultStatus)
+{
+  // Regression, corrected against the LD3M-EC manual V1.2 section 9.4.7:
+  // status word bit3 is the error bit and table 9-11 keys the state on bit6 with
+  // bits 3..0.  0x0638 & 0x004f == 0x0008, so the word the drive reports while it
+  // is powered with a latched fault is a FAULT, not "powered but not enabled".
+  //
+  // An earlier guess in this repository mapped it to switch_on_disabled, which
+  // made the controller send only Shutdown (0x0006) forever: the drive could not
+  // be enabled and the operator saw an unexplained "cannot enable" until the
+  // drive was power cycled.  The parser must report the fault so the controller
+  // raises the reset line, and the bootstrap must still not accept the sample.
+  const auto state = joint_hardware::lift::parse_cia402_status(0x0638);
+  EXPECT_NE(state, Cia402State::unknown);
+  EXPECT_EQ(state, Cia402State::fault);
+
+  // A faulted drive must be reset, must not allow motion, and must report fault.
+  Cia402Controller controller(3, 1);
+  auto inputs = healthy(0x0638);
+  inputs.request_enable = true;
+  const auto decision = controller.step(inputs);
+  EXPECT_EQ(decision.control_word, 0x0080);
+  EXPECT_FALSE(decision.allow_motion);
+  EXPECT_TRUE(decision.fault);
+}
+
+TEST(Cia402, TreatsQuickStopAndVoltageBitsAsStatusOnly)
+{
+  // Bit5 (quick stop) and bit4 (voltage enabled) are status bits that must not
+  // change the decoded state: masking them out is what lets the manual's table
+  // 9-11 combinations match regardless of what the drive reports in those bits.
+  EXPECT_EQ(joint_hardware::lift::parse_cia402_status(0x0638), Cia402State::fault);
+  EXPECT_EQ(joint_hardware::lift::parse_cia402_status(0x0628), Cia402State::fault);
+  EXPECT_EQ(joint_hardware::lift::parse_cia402_status(0x0040), Cia402State::switch_on_disabled);
+  EXPECT_EQ(joint_hardware::lift::parse_cia402_status(0x0640), Cia402State::switch_on_disabled);
+}
+
 TEST(Cia402, ParsesAndEnablesSequence)
 {
   EXPECT_EQ(joint_hardware::lift::parse_cia402_status(0x0040), Cia402State::switch_on_disabled);

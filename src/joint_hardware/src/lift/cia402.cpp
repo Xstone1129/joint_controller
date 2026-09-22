@@ -5,21 +5,49 @@ namespace joint_hardware::lift
 
 Cia402State parse_cia402_status(uint16_t status_word) noexcept
 {
+  // LD3M-EC user manual V1.2.  Section 9.4.7 (status word 6041h, table 9-10)
+  // defines bit3 = error, bit2 = operation enabled, bit1 = switched on,
+  // bit0 = ready to switch on, bit6 = switch on disabled, and table 9-11 keys the
+  // state on those bits.  bits 4/5 (voltage enabled / quick stop) are reported as
+  // set by this drive in ordinary states -- a healthy powered LD3M reports 0x0638
+  // -- so they are masked out of the state comparison, exactly as the standard
+  // 0x006f CiA402 mask does.
   switch (status_word & 0x006fU) {
+    // xxxx,xxxx,x0xx,0000 - not ready to switch on
     case 0x0000:
       return Cia402State::not_ready_to_switch_on;
+    // xxxx,xxxx,x1xx,0000 - switch on disabled (bit6 set, bit3 clear)
     case 0x0040:
       return Cia402State::switch_on_disabled;
+    // xxxx,xxxx,x01x,0001 - ready to switch on
     case 0x0021:
       return Cia402State::ready_to_switch_on;
+    // xxxx,xxxx,x01x,0011 - switched on
     case 0x0023:
       return Cia402State::switched_on;
+    // xxxx,xxxx,x01x,0111 - operation enabled
     case 0x0027:
       return Cia402State::operation_enabled;
+    // xxxx,xxxx,x00x,0111 - quick stop active
     case 0x0007:
       return Cia402State::quick_stop_active;
+    // xxxx,xxxx,x0xx,1111 - fault reaction active
     case 0x000f:
       return Cia402State::fault_reaction_active;
+    // xxxx,xxxx,x0xx,1000 - fault.
+    //
+    // 0x0028 is bit3 (error) with bits 0..2 clear, i.e. a FAULT, and it is the
+    // word the powered LD3M produces when a drive fault is latched: the field
+    // symptom was "the lift cannot be enabled at all" while the status word read
+    // 0x0638 and error code 603Fh stayed 0, so the error bit is the only signal.
+    //
+    // This case used to return switch_on_disabled ("powered but not enabled").
+    // That was a guess made when an unknown state aborted the lift bootstrap; it
+    // silenced a real fault, and because switch_on_disabled only ever sends
+    // Shutdown (0x0006) the controller never raised the fault reset (0x0080), so
+    // the drive stayed un-enableable until it was power cycled.
+    case 0x0028:
+      return Cia402State::fault;
     case 0x0008:
       return Cia402State::fault;
     default:

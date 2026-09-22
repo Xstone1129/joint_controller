@@ -208,9 +208,10 @@ private:
       std::chrono::milliseconds(rollback_timeout_ms_);
     std::unique_lock<std::mutex> lock(status_mutex_);
     while (rclcpp::ok() && std::chrono::steady_clock::now() < deadline) {
-      status_condition_.wait_until(lock, deadline, [this, generation_before]() {
-        return status_generation_ > generation_before;
-      });
+      status_condition_.wait_until(
+        lock, deadline, [this, generation_before]() {
+          return status_generation_ > generation_before;
+        });
 
       if (status_generation_ <= generation_before) {
         continue;
@@ -312,9 +313,10 @@ private:
 
     std::unique_lock<std::mutex> lock(status_mutex_);
     while (rclcpp::ok()) {
-      status_condition_.wait_until(lock, deadline, [this, generation_before]() {
-        return status_generation_ > generation_before;
-      });
+      status_condition_.wait_until(
+        lock, deadline, [this, generation_before]() {
+          return status_generation_ > generation_before;
+        });
 
       if (status_generation_ > generation_before) {
         received_post_command_status = true;
@@ -328,7 +330,10 @@ private:
             lock.unlock();
             response->success = false;
             response->message = unavailable_message + "; enabled=" +
-              std::to_string(std::count(latest_status.enabled.begin(), latest_status.enabled.end(), true)) +
+              std::to_string(
+              std::count(
+                latest_status.enabled.begin(), latest_status.enabled.end(),
+                true)) +
               "/14";
             response->message += "; " + rollback_failed_enable();
             RCLCPP_ERROR(get_logger(), "%s", response->message.c_str());
@@ -356,9 +361,12 @@ private:
 
     response->success = false;
     if (!received_post_command_status) {
-      response->message = "Power command published but no post-command /arm/power_status was received";
+      response->message =
+        "Power command published but no post-command /arm/power_status was received";
     } else {
-      response->message = "Power confirmation timed out: " + describe_status(latest_status, request->enable);
+      response->message = "Power confirmation timed out: " + describe_status(
+        latest_status,
+        request->enable);
     }
     if (request->enable) {
       response->message += "; " + rollback_failed_enable();

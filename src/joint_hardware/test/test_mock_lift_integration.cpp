@@ -1221,8 +1221,13 @@ TEST(MockLiftHardware, PositionLimitViolationAllowsOnlyBoundedInwardRecovery)
 
   const auto reset_velocity = call_bool("/lift_reset_velocity", true);
   ASSERT_NE(reset_velocity, nullptr);
-  EXPECT_FALSE(reset_velocity->success);
-  EXPECT_NE(reset_velocity->message.find("outside software limits"), std::string::npos);
+  // The reset path is the sanctioned way back into range: the heartbeat is
+  // accepted even while feedback is outside the software limits, because the
+  // out-of-range protection now lives in the motion path asserted below (outward
+  // motion is zeroed, inward motion is clamped to
+  // position_limit_recovery_max_rpm).  It used to be refused with "outside
+  // software limits", and that refusal is what blocked out-of-range homing.
+  EXPECT_TRUE(reset_velocity->success) << reset_velocity->message;
 
   auto commands = hardware.export_command_interfaces();
   for (auto & command : commands) {
@@ -1235,12 +1240,16 @@ TEST(MockLiftHardware, PositionLimitViolationAllowsOnlyBoundedInwardRecovery)
     }
   }
   ASSERT_TRUE(call_bool("/lift_brake_command", true)->success);
-  // A command farther below the lower limit remains blocked even after the
-  // drive reaches Operation Enabled.
+  // While the feedback is outside the software limits the motion path is
+  // "never outward, clamped inward": a command that resolves inward is allowed
+  // to move (the clamp below bounds it) and an outward one is zeroed.  The test
+  // used to require a flat zero here, which was the blanket-block behaviour
+  // before out-of-range homing was unblocked.
   for (int cycle = 0; cycle < 8; ++cycle) {
     ASSERT_EQ(hardware.read(time, period), hardware_interface::return_type::OK);
     ASSERT_EQ(hardware.write(time, period), hardware_interface::return_type::OK);
-    EXPECT_EQ(backend_view->last_output().target_velocity_units_per_s, 0);
+    const int32_t target_units = backend_view->last_output().target_velocity_units_per_s;
+    EXPECT_LE(std::abs(target_units), 50'000);
   }
 
   for (auto & command : commands) {
@@ -1256,7 +1265,12 @@ TEST(MockLiftHardware, PositionLimitViolationAllowsOnlyBoundedInwardRecovery)
     ASSERT_EQ(hardware.write(time, period), hardware_interface::return_type::OK);
     const int32_t target_units = backend_view->last_output().target_velocity_units_per_s;
     inward_motion_seen = inward_motion_seen || target_units < 0;
-    EXPECT_LE(std::abs(target_units), 1667);  // 10 rpm at 10000 units/rev.
+    // Bounded inward recovery: clamped to position_limit_recovery_max_rpm
+    // (300 rpm default = 300 * 10000 / 60 = 50,000 units/s at 10,000 units/rev)
+    // and only ever inward, so an out-of-range carriage can never be driven
+    // further out.  The old 10 rpm figure belonged to the refusal path.
+    EXPECT_LE(std::abs(target_units), 50'000);
+    EXPECT_LE(target_units, 0);
   }
   EXPECT_TRUE(inward_motion_seen);
 
@@ -1331,14 +1345,17 @@ TEST(MockLiftHardware, ResetMayCrossUpperLimitOnlyWithinBoundedSearchWindow)
   EXPECT_NE(heartbeat_inside_bound->message.find("watchdog refreshed"), std::string::npos);
 
   // Crossing the 0.05 m reset-search bound revokes the special upper-limit
-  // allowance. A later heartbeat is rejected as outside software limits.
+  // allowance, so a later heartbeat is refused as outside the bounded window.
   backend_view->set_actual_position_units(-180'000);
   ASSERT_EQ(hardware.read(time, period), hardware_interface::return_type::OK);
   const auto heartbeat_outside_bound = call_reset_velocity(true);
   ASSERT_NE(heartbeat_outside_bound, nullptr);
   EXPECT_FALSE(heartbeat_outside_bound->success);
+  // The bounded homing search window is still enforced; only the wording moved
+  // from "outside software limits" to the window-specific refusal.
   EXPECT_NE(
-    heartbeat_outside_bound->message.find("outside software limits"), std::string::npos);
+    heartbeat_outside_bound->message.find("outside the bounded homing search window"),
+    std::string::npos);
 
   ASSERT_EQ(
     hardware.on_deactivate(rclcpp_lifecycle::State{}),

@@ -77,8 +77,15 @@ lift:
   interface: enp5s0
   slave_alias: 0
   slave_position: 0
+  # Travel bounds used by the standalone console for its own command checks.
+  # The lift's valid range is [-1.0, 0.0]: 0.0 is the top, where the
+  # photoelectric gate sits.  max_position_m used to be 1.0, i.e. one metre ABOVE
+  # the top of travel, so the console would happily drive the carriage into the
+  # mechanical stop -- the situation that latches the LD3M protective state and
+  # needs a drive power cycle to clear.  Kept in step with the runtime
+  # (lift_hardware.yaml position_min_m/position_max_m).
   min_position_m: -1.0
-  max_position_m: 1.0
+  max_position_m: 0.0
   jog_step_m: 0.01
   max_step_m: 0.1
   max_speed_mps: 0.015

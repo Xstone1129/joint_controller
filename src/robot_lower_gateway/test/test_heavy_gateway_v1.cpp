@@ -617,10 +617,19 @@ TEST(HeavyGatewayV1, ContractLeaseValidationWatchdogsAndFeedbackMapping)
   EXPECT_EQ(aligned_hold.mode, Command::MODE_HOLD);
   EXPECT_EQ(aligned_hold.field_mask, Command::FIELD_POSITION);
   EXPECT_DOUBLE_EQ(aligned_hold.position[0], -0.25);
-  EXPECT_DOUBLE_EQ(aligned_hold.velocity[0], 0.0);
   for (std::size_t index = 1; index < aligned_hold.position.size(); ++index) {
     EXPECT_DOUBLE_EQ(aligned_hold.position[index], 0.1 * static_cast<double>(index));
-    EXPECT_DOUBLE_EQ(aligned_hold.velocity[index], 0.01 * static_cast<double>(index));
+  }
+  // The aligned HOLD is position-only by construction: makeHoldCommandLocked()
+  // sets field_mask = FIELD_POSITION and fills velocity/acceleration with zero,
+  // so a hold can never command motion.  The test used to expect the feedback
+  // velocities (0.01 * index) to be echoed here, which only held while the
+  // command also carried FIELD_VELOCITY; the position mapping above still proves
+  // the per-joint feedback mapping.
+  EXPECT_EQ(aligned_hold.field_mask, Command::FIELD_POSITION);
+  for (std::size_t index = 0; index < aligned_hold.velocity.size(); ++index) {
+    EXPECT_DOUBLE_EQ(aligned_hold.velocity[index], 0.0);
+    EXPECT_DOUBLE_EQ(aligned_hold.acceleration[index], 0.0);
   }
   ASSERT_TRUE(
     observer->waitFor(
@@ -1148,14 +1157,31 @@ TEST(HeavyGatewayV1, ContractLeaseValidationWatchdogsAndFeedbackMapping)
     observer->command_publisher_->publish(stalled_hold);
     std::this_thread::sleep_for(10ms);
   }
-  ASSERT_TRUE(observer->waitFor(
+  const bool stalled_released = observer->waitFor(
       [&stalled_lease, &stalled_baseline](const Status & status, const Feedback &) {
       return status.active_owner_id.empty() &&
                status.active_lease_id.empty() &&
                status.accepted_commands == stalled_baseline.accepted_commands + 1 &&
                status.detail.find("automatic release") != std::string::npos &&
-               status.detail.find("lower controller apply acknowledgement timeout") != std::string::npos;
-      }, 1s));
+               // The automatic-release path composes its own reason
+               // ("automatic release: controller HOLD ack timeout; lease revoked
+               // after STOP/HOLD submission"), so it names the ack timeout as
+               // "controller HOLD ack timeout".  The test used to look for the
+               // FAULT-branch wording ("lower controller apply acknowledgement
+               // timeout"), which never appears on this path even though the
+               // ack-timeout release happens exactly as intended.
+               status.detail.find("controller HOLD ack timeout") != std::string::npos;
+      }, 1s);
+  // Report what the gateway actually did instead of only "condition not met":
+  // a lease that stays held, a different accepted-command count and a different
+  // detail are three different bugs and the bare waitFor hides which one it is.
+  ASSERT_TRUE(stalled_released)
+    << "state=" << observer->status().state
+    << " owner='" << observer->status().active_owner_id << "'"
+    << " lease='" << observer->status().active_lease_id << "'"
+    << " accepted=" << observer->status().accepted_commands
+    << " baseline=" << stalled_baseline.accepted_commands
+    << " detail='" << observer->status().detail << "'";
   EXPECT_NE(observer->status().detail.find("received_commands="), std::string::npos);
   EXPECT_NE(
     observer->status().detail.find("last_received_sequence=" +
@@ -1386,6 +1412,167 @@ TEST(HeavyGatewayV1, RejectsLeaseBeforeBothLowerControllerEndpointsAreReady)
     std::string::npos);
   EXPECT_NE(response->message.find("command_subscriptions=0/2"), std::string::npos);
   EXPECT_EQ(observer->status().accepted_commands, 0U);
+}
+
+TEST(HeavyGatewayV1, DropsLeaseWhenTheWatchdogExpiresWithTheAckStillMissing)
+{
+  // Fault injection: the release HOLD is submitted but the controllers never
+  // acknowledge it.  Exercising that state used to leave the gateway holding a
+  // lease the lower side had already dropped ("owner or lease mismatch" forever,
+  // recoverable only by restarting the stack).  Whatever path clears it -- the
+  // bounded release fallback or the execution watchdog -- the lease must be gone
+  // within a few seconds and a different owner must be able to take over.
+  if (!rclcpp::ok()) {
+    int argc = 0;
+    rclcpp::init(argc, nullptr);
+  }
+
+  rclcpp::NodeOptions gateway_options;
+  gateway_options.parameter_overrides(
+    {rclcpp::Parameter("heavy_v1.heavy_lift_brake_native_service", "/mock/lift_brake")});
+  auto gateway_node = std::make_shared<rclcpp::Node>(
+    "heavy_gateway_v1_watchdog_without_ack", gateway_options);
+  auto gateway = std::make_unique<robot_lower_gateway::HeavyGatewayV1>(*gateway_node);
+  auto mock = std::make_shared<MockLowerControllers>();
+  auto observer = std::make_shared<ObservationNode>();
+  auto clients = std::make_shared<rclcpp::Node>("heavy_gateway_v1_watchdog_clients");
+
+  rclcpp::executors::MultiThreadedExecutor executor(rclcpp::ExecutorOptions(), 4);
+  executor.add_node(gateway_node);
+  executor.add_node(mock);
+  executor.add_node(observer);
+  executor.add_node(clients);
+  ExecutorGuard executor_guard(executor);
+
+  ASSERT_TRUE(observer->waitFor(
+      [](const Status & status, const Feedback &) {return status.state == Status::STATE_MONITOR;},
+      2s));
+
+  using Acquire = robot_control_msg::srv::AcquireHeavyExecutionLeaseV1;
+  auto acquire_client = clients->create_client<Acquire>(contract::kAcquireLeaseService.data());
+  auto acquire_request = std::make_shared<Acquire::Request>();
+  acquire_request->owner_id = "watchdog-no-ack-owner";
+  acquire_request->protocol_major = 1;
+  acquire_request->protocol_minor = 0;
+  acquire_request->layout_crc32 = contract::kLayoutCrc32;
+  const auto first = callService<Acquire>(acquire_client, acquire_request);
+  ASSERT_NE(first, nullptr);
+  ASSERT_TRUE(first->granted) << first->message;
+  const auto held_lease = first->lease_id;
+
+  // The controllers stop acknowledging, so nothing but the watchdogs can end the
+  // lease from here on.
+  mock->setAcknowledgementsEnabled(false);
+
+  using Release = robot_control_msg::srv::ReleaseHeavyExecutionLeaseV1;
+  auto release_client = clients->create_client<Release>(contract::kReleaseLeaseService.data());
+  auto release_request = std::make_shared<Release::Request>();
+  release_request->owner_id = acquire_request->owner_id;
+  release_request->lease_id = held_lease;
+  const auto released = callService<Release>(release_client, release_request);
+  ASSERT_NE(released, nullptr);
+
+  // Cleanup must converge without a restart, whichever fallback fires first.
+  const auto deadline = std::chrono::steady_clock::now() + 6s;
+  bool lease_cleared = false;
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (observer->status().active_owner_id.empty() &&
+      observer->status().active_lease_id.empty())
+    {
+      lease_cleared = true;
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  }
+  EXPECT_TRUE(lease_cleared)
+    << "lease survived a dropped release acknowledgement: owner='"
+    << observer->status().active_owner_id << "' lease='"
+    << observer->status().active_lease_id << "' detail=" << observer->status().detail;
+
+  auto next_client = clients->create_client<Acquire>(contract::kAcquireLeaseService.data());
+  auto next_request = std::make_shared<Acquire::Request>();
+  next_request->owner_id = "owner-after-watchdog-expiry";
+  next_request->protocol_major = 1;
+  next_request->protocol_minor = 0;
+  next_request->layout_crc32 = contract::kLayoutCrc32;
+  const auto next = callService<Acquire>(next_client, next_request);
+  ASSERT_NE(next, nullptr);
+  EXPECT_TRUE(next->granted) << next->message;
+}
+
+TEST(HeavyGatewayV1, ClearsLeaseWhenReleaseHoldIsNotAcknowledged)
+{
+  // Regression: when the HOLD submitted for an explicit release was not
+  // acknowledged within controller_ack_timeout_ms, the gateway only switched to
+  // FAULT and left the revocation pending.  The lease then stayed active with a
+  // stale owner and every new acquire was refused, so `lift power on` kept
+  // failing until the stack was restarted.
+  if (!rclcpp::ok()) {
+    int argc = 0;
+    rclcpp::init(argc, nullptr);
+  }
+
+  rclcpp::NodeOptions gateway_options;
+  gateway_options.parameter_overrides(
+    {rclcpp::Parameter("heavy_v1.heavy_lift_brake_native_service", "/mock/lift_brake")});
+  auto gateway_node = std::make_shared<rclcpp::Node>(
+    "heavy_gateway_v1_release_ack_timeout", gateway_options);
+  auto gateway = std::make_unique<robot_lower_gateway::HeavyGatewayV1>(*gateway_node);
+  auto mock = std::make_shared<MockLowerControllers>();
+  auto observer = std::make_shared<ObservationNode>();
+  auto clients = std::make_shared<rclcpp::Node>("heavy_gateway_v1_release_clients");
+
+  rclcpp::executors::MultiThreadedExecutor executor(rclcpp::ExecutorOptions(), 4);
+  executor.add_node(gateway_node);
+  executor.add_node(mock);
+  executor.add_node(observer);
+  executor.add_node(clients);
+  ExecutorGuard executor_guard(executor);
+
+  ASSERT_TRUE(observer->waitFor(
+      [](const Status & status, const Feedback &) {return status.state == Status::STATE_MONITOR;},
+      2s));
+
+  using Acquire = robot_control_msg::srv::AcquireHeavyExecutionLeaseV1;
+  auto acquire_client = clients->create_client<Acquire>(contract::kAcquireLeaseService.data());
+  auto acquire_request = std::make_shared<Acquire::Request>();
+  acquire_request->owner_id = "release-timeout-owner";
+  acquire_request->protocol_major = 1;
+  acquire_request->protocol_minor = 0;
+  acquire_request->layout_crc32 = contract::kLayoutCrc32;
+  const auto acquired = callService<Acquire>(acquire_client, acquire_request);
+  ASSERT_NE(acquired, nullptr);
+  ASSERT_TRUE(acquired->granted) << acquired->message;
+
+  // The release HOLD will never be acknowledged, so the bounded ACK timeout path
+  // is what must clear the lease.
+  mock->setAcknowledgementsEnabled(false);
+
+  using Release = robot_control_msg::srv::ReleaseHeavyExecutionLeaseV1;
+  auto release_client = clients->create_client<Release>(contract::kReleaseLeaseService.data());
+  auto release_request = std::make_shared<Release::Request>();
+  release_request->owner_id = acquire_request->owner_id;
+  release_request->lease_id = acquired->lease_id;
+  const auto released = callService<Release>(release_client, release_request);
+  ASSERT_NE(released, nullptr);
+  // The release must finish deterministically instead of only flipping to FAULT.
+  EXPECT_TRUE(released->released) << released->message;
+  EXPECT_NE(released->message.find("ack timeout"), std::string::npos) << released->message;
+  // The stuck revocation must also be visible in diagnostics, not only in the
+  // service reply.
+  EXPECT_NE(
+    observer->status().detail.find("explicit_release_ack_timeout"), std::string::npos)
+    << observer->status().detail;
+
+  auto next_client = clients->create_client<Acquire>(contract::kAcquireLeaseService.data());
+  auto next_request = std::make_shared<Acquire::Request>();
+  next_request->owner_id = "owner-after-release-timeout";
+  next_request->protocol_major = 1;
+  next_request->protocol_minor = 0;
+  next_request->layout_crc32 = contract::kLayoutCrc32;
+  const auto next_acquired = callService<Acquire>(next_client, next_request);
+  ASSERT_NE(next_acquired, nullptr);
+  EXPECT_TRUE(next_acquired->granted) << next_acquired->message;
 }
 
 }  // namespace

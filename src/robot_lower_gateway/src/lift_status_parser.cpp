@@ -190,6 +190,11 @@ bool parseLiftControlStatus(
   {
     return false;
   }
+  // Optional: older controllers do not publish it, so a missing key is not an
+  // error, but when it is present it explains a controller-latched fault.
+  if (root.isMember("fault_reason") && root["fault_reason"].isString()) {
+    parsed.fault_reason = root["fault_reason"].asString();
+  }
   status = std::move(parsed);
   error.clear();
   return true;

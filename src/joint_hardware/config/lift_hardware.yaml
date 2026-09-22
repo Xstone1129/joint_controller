@@ -29,6 +29,8 @@ command_units_per_rev: 10000
 encoder_counts_per_rev: 131072
 position_min_m: -1.0
 position_max_m: 0.0
+# A positive pre-homing encoder offset must be recovered with lift reset.
+# Keep the motion limit consistent with the gateway's native safety bound.
 # Photoelectric homing is the only path allowed above position_max_m. Bound
 # that search relative to the position where reset starts, because the
 # pre-calibration boot coordinate may call any physical lift height zero.
@@ -104,7 +106,13 @@ lift_joint_state_stale_timeout_ms: 500
 lift_startup_motion_guard_enabled: true
 lift_startup_motion_guard_ms: 3000
 
-reset_velocity_rpm: 96
+# Photoelectric homing speed. 180 rpm x 3.333333333 mm/rev / 60 = 10.0 mm/s
+# (0.010 m/s) of carriage travel.  The gate is only a narrow band, and hitting
+# the mechanical end stop at the top latches the LD3M drive into a protective
+# state that only a drive power cycle clears, so keep this conservative.
+# A full 0.85 m search takes ~85 s, so pass a matching --max-sec to
+# `lift reset`.  Change this value and restart the lower stack to re-tune.
+reset_velocity_rpm: 180
 reset_velocity_period_ms: 50
 # The app refreshes this takeover while both the global safety state and the
 # lift_upper signal remain fresh. Process/network loss therefore stops motion.
@@ -142,4 +150,10 @@ brake_p06_14_ms: 500
 brake_p05_06_mode: drive_default
 brake_p05_10_mode: drive_default
 
-zero_offset_file: /tmp/joint_hardware_lift_zero_offset.cfg
+# Host zero-offset store.  Left unset on purpose: the launch file defaults it to
+# $HOME/.local/state/joint_controller/lift_zero_offset.cfg, which is where the
+# running stack actually reads and writes the offset.  This file used to declare
+# /tmp/joint_hardware_lift_zero_offset.cfg, but the launch ignored the value, so
+# the entry only ever misled readers.  Set an absolute path here only if the
+# offset really must live elsewhere (it takes precedence over the $HOME default).
+# zero_offset_file: /home/user/.local/state/joint_controller/lift_zero_offset.cfg

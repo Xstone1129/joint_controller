@@ -96,13 +96,14 @@ std_msgs::msg::String driverStatus(
   return message;
 }
 
-std_msgs::msg::String controlStatus()
+std_msgs::msg::String controlStatus(
+  const std::string & mode = "hold", const std::string & fault_reason = "")
 {
   std_msgs::msg::String message;
   message.data =
-    "{\"component\":\"lift_controller\",\"mode\":\"hold\"," 
+    "{\"component\":\"lift_controller\",\"mode\":\"" + mode + "\"," 
     "\"position\":-0.125,\"velocity\":0.0,\"trajectory_active\":false," 
-    "\"jog_active\":false}";
+    "\"jog_active\":false,\"fault_reason\":\"" + fault_reason + "\"}";
   return message;
 }
 
@@ -206,6 +207,18 @@ TEST_F(LiftStatusPublicationTest, NormalizesFeedbackFailClosedAndSurvivesLifecyc
       }
     };
 
+  // Same as publish_inputs but with an explicit controller status, so a test can
+  // drive the controller side (mode / fault_reason) independently of the drive.
+  const auto publish_inputs_with_control =
+    [&](const std_msgs::msg::String & driver, const std_msgs::msg::String & control) {
+      for (int attempt = 0; attempt < 12; ++attempt) {
+        driver_publisher->publish(driver);
+        control_publisher->publish(control);
+        joint_publisher->publish(jointState());
+        std::this_thread::sleep_for(25ms);
+      }
+    };
+
   const auto discovery_deadline = std::chrono::steady_clock::now() + 5s;
   while ((driver_publisher->get_subscription_count() == 0 ||
     control_publisher->get_subscription_count() == 0 ||
@@ -241,6 +254,18 @@ TEST_F(LiftStatusPublicationTest, NormalizesFeedbackFailClosedAndSurvivesLifecyc
   ASSERT_TRUE(wait_until([](const LiftStatus & status) {
       return status.valid && !status.fault && !status.motion_blocked &&
              status.fault_reason.empty();
+    }));
+
+  // A controller-latched fault with no drive fault code must still reach the host
+  // with an explanation.  The drive-side safety status carries no reason here, so
+  // the published fault_reason has to fall back to the controller's own text
+  // instead of staying empty ("silent fault").
+  publish_inputs_with_control(
+      driverStatus(false),
+      controlStatus("fault", "gate_lost_during_motion: entry_mode=streaming"));
+  ASSERT_TRUE(wait_until([](const LiftStatus & status) {
+      return status.controller_mode == "fault" &&
+             status.fault_reason == "gate_lost_during_motion: entry_mode=streaming";
     }));
 
   publish_inputs(driverStatus(false, true, "PDO exchange failed"));

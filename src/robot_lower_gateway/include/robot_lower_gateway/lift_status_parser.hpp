@@ -39,6 +39,10 @@ struct LiftDriverStatus
 
 struct LiftControlStatus
 {
+  // Controller-side fault text.  The drive-side fault_reason stays empty when
+  // the drive itself reports no fault code, so the gateway falls back to this
+  // one instead of publishing an unexplained fault.
+  std::string fault_reason;
   std::string mode;
   bool trajectory_active{false};
   bool jog_active{false};

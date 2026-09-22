@@ -793,8 +793,15 @@ controller_interface::return_type LiftController::update(
     }
   }
 
+  // Only an UNREQUESTED loss of the driver gate is a fault.  When this machine
+  // intentionally disables the drive (the host zero write does exactly that:
+  // "drive will stop, disable and persist the current 6064h"), the gate goes
+  // unready by design, and latching gate_lost_during_motion there left
+  // controller_mode=fault after every `lift reset`, so the next `lift power on`
+  // was rejected until the operator ran `lift lease reset`.
   if (mode_ != Mode::hold && mode_ != Mode::brake_gate && mode_ != Mode::estop &&
-    !driver_gate_ready())
+    !driver_gate_ready() &&
+    power_enable_requested_.load(std::memory_order_acquire))
   {
     record_lift_fault("gate_lost_during_motion", [this]() {
       std::ostringstream detail;
@@ -936,6 +943,7 @@ controller_interface::return_type LiftController::update(
   // one WARN per window once the failure is sustained, and one INFO on
   // recovery. A latched fault is skipped here because the [LIFT_FAULT] record
   // already carries the same breakdown.
+  apply_zero_frame_resync();
   log_gate_diagnostics("update");
   write_command_interfaces(command_sample_);
   confirm_pending_hold();
@@ -1093,6 +1101,56 @@ void LiftController::begin_soft_stop(
   pending_hold_generation_ = hold_generation;
   status_message_ = reason ? reason : "soft stop";
   goal_stable_active_ = false;
+}
+
+// A re-zero (`lift reset`, or the host zero-offset path) rewrites the drive
+// origin while the carriage is standing still.  Every setpoint captured before
+// that write is expressed against the previous origin, so the retained HOLD /
+// stream target now points at a position the operator never asked for.
+// LiftHardware turns the difference between that setpoint and the measured
+// position into a velocity target the moment the drive is enabled, which is
+// exactly "run lift reset, then lift power on, and the carriage dives to the
+// old target".  Re-seat the whole command state on the new frame instead: the
+// next enable then has nothing to chase, and the following explicit command
+// starts from where the carriage actually is.
+void LiftController::apply_zero_frame_resync()
+{
+  if (!driver_zero_generation_valid_.load(std::memory_order_acquire)) {
+    return;
+  }
+  const uint64_t generation = driver_zero_generation_.load(std::memory_order_acquire);
+  if (generation == applied_zero_generation_) {
+    return;
+  }
+  applied_zero_generation_ = generation;
+  const double measured = std::clamp(
+    measured_position_m_, limits_.min_position_m, limits_.max_position_m);
+  if (!std::isfinite(measured)) {
+    return;
+  }
+  const double stale_setpoint = command_sample_.position_m;
+  const Mode entry_mode = mode_;
+  // A latched fault or e-stop keeps its latch: only the frame state is rebuilt.
+  const bool latched = mode_ == Mode::fault || mode_ == Mode::estop;
+  active_trajectory_.reset();
+  gated_command_valid_ = false;
+  pending_hold_generation_ = 0;
+  goal_stable_active_ = false;
+  profile_.hold(measured);
+  command_sample_ = profile_.state();
+  if (!latched) {
+    mode_ = Mode::hold;
+    status_message_ = "HOLD on the new zero frame; setpoint re-seated";
+  }
+  ++zero_resync_total_;
+  last_zero_resync_from_m_ = stale_setpoint;
+  last_zero_resync_to_m_ = measured;
+  RCLCPP_WARN(
+    get_node()->get_logger(),
+    "[LIFT_ZERO] state=setpoint_resynced zero_generation=%llu entry_mode=%s "
+    "stale_setpoint=%.6f measured_position=%.6f",
+    static_cast<unsigned long long>(generation), mode_name(entry_mode),
+    stale_setpoint, measured);
 }
 
 void LiftController::enter_hold(double measured_position, const char * reason)
@@ -1267,6 +1325,35 @@ void LiftController::note_lift_fault_repeat(const char * code) noexcept
   ++newest.repeats;
 }
 
+std::string LiftController::last_fault_text() const
+{
+  // Report a fault only while it is actually latched.  The bounded fault history
+  // is published separately (fault_history/fault_total) so an already-recovered
+  // fault stays visible for post-mortem, but it must not masquerade as the
+  // CURRENT reason: on_activate clears the latch by resetting mode_ to hold while
+  // deliberately keeping the history, so reading the newest history entry here
+  // made a freshly cleared fault still show up as fault_reason -- an operator who
+  // had just cleared the latch (or re-activated the controller) saw the old text
+  // and concluded nothing had changed.
+  if (static_cast<Mode>(mode_atomic_.load(std::memory_order_acquire)) != Mode::fault) {
+    return std::string();
+  }
+  if (fault_history_count_ == 0U) {
+    return std::string();
+  }
+  // The status writer walks the history newest-first as
+  // (fault_history_next_ + capacity - 1 - offset) % capacity, so offset 0 is it.
+  const std::size_t newest =
+    (fault_history_next_ + kFaultHistoryCapacity - 1U) % kFaultHistoryCapacity;
+  const auto & record = fault_history_[newest];
+  std::string text(record.code);
+  if (record.detail[0] != '\0') {
+    text += ": ";
+    text += record.detail;
+  }
+  return text;
+}
+
 void LiftController::write_lift_fault(const char * code, const std::string & detail)
 {
   const char * fault_code = code != nullptr ? code : "unknown";
@@ -1439,6 +1526,17 @@ void LiftController::on_driver_status(const std_msgs::msg::String & message)
   driver_status_ns_.store(
     std::chrono::duration_cast<std::chrono::nanoseconds>(
       std::chrono::steady_clock::now().time_since_epoch()).count());
+  if (message.data.find("\"zero_generation\":") != std::string::npos) {
+    const uint64_t generation =
+      static_cast<uint64_t>(json_integer(message.data, "zero_generation"));
+    driver_zero_generation_.store(generation, std::memory_order_release);
+    if (!driver_zero_generation_valid_.exchange(true, std::memory_order_acq_rel)) {
+      // First observation only adopts the current frame: a restart must not
+      // look like a re-zero.  on_activate already seats the setpoint on the
+      // measured position, so there is nothing to correct here.
+      applied_zero_generation_ = generation;
+    }
+  }
 }
 
 void LiftController::publish_status()
@@ -1455,6 +1553,11 @@ void LiftController::publish_status()
          << ",\"command_position\":" << command_position_atomic_.load()
          << ",\"command_velocity\":" << command_velocity_atomic_.load()
          << ",\"command_acceleration\":" << command_acceleration_atomic_.load()
+         << ",\"zero_generation\":"
+         << driver_zero_generation_.load(std::memory_order_acquire)
+         << ",\"zero_resync_total\":" << zero_resync_total_
+         << ",\"last_zero_resync_from\":" << last_zero_resync_from_m_
+         << ",\"last_zero_resync_to\":" << last_zero_resync_to_m_
          << ",\"estop_latched\":" << (driver_estop_latched_.load() ? "true" : "false")
          << ",\"brake_gate_ready\":" << (driver_gate_ready() ? "true" : "false")
          << ",\"power_enable_command\":" <<
@@ -1469,6 +1572,7 @@ void LiftController::publish_status()
          << ",\"gate_ready\":" << (driver_gate_ready() ? "true" : "false")
          << ",\"gate_failure\":" << json_quote(
     driver_gate_ready() ? std::string("none") : driver_gate_failure_reason())
+         << ",\"fault_reason\":" << json_quote(last_fault_text())
          << ",\"fault_total\":" << fault_total_
          << ",\"fault_history\":[";
   // Diagnostics only. The RT writer appends without a lock so a reader can

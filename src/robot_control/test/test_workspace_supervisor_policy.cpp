@@ -1,4 +1,5 @@
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "gtest/gtest.h"
@@ -113,5 +114,48 @@ TEST(WorkspaceSupervisorPolicy, NewStartReappliesPowerOffGate)
   EXPECT_EQ(result.state, WorkspaceStatus::ERROR);
   EXPECT_FALSE(result.accepted);
   EXPECT_NE(result.message.find("confirmed power-off"), std::string::npos);
+}
+TEST(WorkspaceSupervisorPolicy, ArmFeedbackArrayIssueAcceptsFourteenAxes)
+{
+  EXPECT_TRUE(policy::arm_feedback_array_issue(make_power_status(false)).empty());
+  EXPECT_TRUE(policy::collect_arm_drive_issues(make_power_status(false)).empty());
+}
+
+TEST(WorkspaceSupervisorPolicy, ArmFeedbackArrayIssueRejectsPartialArrays)
+{
+  auto power = make_power_status(false);
+  power.joint_names.pop_back();
+  const auto issue = policy::arm_feedback_array_issue(power);
+
+  EXPECT_NE(issue.find("invalid array sizes"), std::string::npos);
+  EXPECT_NE(issue.find("names=13"), std::string::npos);
+  EXPECT_NE(issue.find("(expected 14 each)"), std::string::npos);
+}
+
+TEST(WorkspaceSupervisorPolicy, ArmDriveIssuesReportMappingMismatch)
+{
+  auto power = make_power_status(false);
+  std::swap(power.joint_names[0], power.joint_names[1]);
+  const auto issues = policy::collect_arm_drive_issues(power);
+
+  ASSERT_EQ(issues.size(), 2U);
+  EXPECT_NE(issues[0].find("mapping mismatch at index 0"), std::string::npos);
+  EXPECT_NE(issues[0].find("got=ljoint2 expected=ljoint1"), std::string::npos);
+  EXPECT_NE(issues[1].find("mapping mismatch at index 1"), std::string::npos);
+}
+
+TEST(WorkspaceSupervisorPolicy, ArmDriveIssuesAggregateUnavailableDrivesInOrder)
+{
+  auto power = make_power_status(false);
+  power.status_codes[1] = 0;
+  power.status_codes[8] = 0;
+  const auto issues = policy::collect_arm_drive_issues(power);
+
+  ASSERT_EQ(issues.size(), 1U);
+  EXPECT_NE(
+    issues.front().find(
+      "REAL EtherCAT drives unavailable: "
+      "ljoint2(status=0/unavailable), rjoint2(status=0/unavailable)"),
+    std::string::npos);
 }
 }  // namespace

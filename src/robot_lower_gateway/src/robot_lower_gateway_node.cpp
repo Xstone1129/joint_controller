@@ -234,6 +234,12 @@ private:
       "native_services.lift_hold", "/joint/lift/hold");
     native_lift_set_drive_zero_service_ = declare_parameter<std::string>(
       "native_services.lift_set_drive_zero", "/lift_set_drive_zero");
+    // Host-frame zero: persists the current 6064h as the ROS coordinate zero.
+    // Unlike the LD3M P00.15=9 maintenance zero it takes effect immediately and
+    // needs no drive power cycle, which is what an operator means by
+    // "set the current position as zero".
+    native_lift_host_zero_service_ = declare_parameter<std::string>(
+      "native_services.lift_host_zero", "/lift_reset_zero");
 
     power_timeout_ = commandTimeout(*this, "command_timeout_ms.power", 30000);
     mode_timeout_ = commandTimeout(*this, "command_timeout_ms.mode", 5000);
@@ -244,6 +250,8 @@ private:
     lift_safety_timeout_ = commandTimeout(*this, "command_timeout_ms.lift_safety", 5000);
     lift_set_drive_zero_timeout_ = commandTimeout(
       *this, "command_timeout_ms.lift_set_drive_zero", 10000);
+    lift_host_zero_timeout_ = commandTimeout(
+      *this, "command_timeout_ms.lift_host_zero", 10000);
 
     if (!enable_command_proxy_) {
       return;
@@ -277,6 +285,9 @@ private:
       native_lift_stop_service_, rmw_qos_profile_services_default, client_callback_group_);
     lift_hold_client_ = create_client<Trigger>(
       native_lift_hold_service_, rmw_qos_profile_services_default, client_callback_group_);
+    lift_host_zero_client_ = create_client<Trigger>(
+      native_lift_host_zero_service_, rmw_qos_profile_services_default,
+      command_service_callback_group_);
     lift_set_drive_zero_client_ = create_client<Trigger>(
       native_lift_set_drive_zero_service_, rmw_qos_profile_services_default,
       client_callback_group_);
@@ -346,6 +357,12 @@ private:
       [this](const std::shared_ptr<Trigger::Request> request,
       std::shared_ptr<Trigger::Response> response) {
         handleLiftSetDriveZeroProxy(request, response);
+      }, rmw_qos_profile_services_default, command_service_callback_group_);
+    lift_host_zero_proxy_service_ = create_service<Trigger>(
+      proxyServiceName(command_proxy_prefix_, "lift/set_host_zero"),
+      [this](const std::shared_ptr<Trigger::Request> request,
+      std::shared_ptr<Trigger::Response> response) {
+        handleLiftHostZeroProxy(request, response);
       }, rmw_qos_profile_services_default, command_service_callback_group_);
 
     RCLCPP_INFO(
@@ -570,9 +587,32 @@ private:
     if (request->data) {
       std::string precondition_error;
       if (!liftCommandPreconditionsMet(precondition_error)) {
-        response->success = false;
-        response->message = precondition_error;
-        return;
+        // A latched controller fault must not need a human: the same native STOP
+        // that a fresh lease acquisition sends clears it.  Without this, every
+        // `lift reset` (whose zero write disables the drive by design) left the
+        // controller in fault and the next `lift power on` was refused until the
+        // operator ran `lift lease reset`.
+        const bool fault_latched = precondition_error.find("controller_mode=") != std::string::npos;
+        if (fault_latched && lift_stop_client_ && lift_stop_client_->service_is_ready()) {
+          auto retry_request = std::make_shared<Trigger::Request>();
+          std::string retry_error;
+          const auto retry_result = callNativeServiceBounded<Trigger>(
+            retry_request, lift_stop_client_, native_lift_stop_service_,
+            lift_safety_timeout_, retry_error);
+          if (retry_result) {
+            RCLCPP_WARN(
+              get_logger(),
+              "lift power enable found %s; sent a recovery STOP (result=%s) and retrying",
+              precondition_error.c_str(), retry_result->message.c_str());
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            liftCommandPreconditionsMet(precondition_error);
+          }
+        }
+        if (!precondition_error.empty()) {
+          response->success = false;
+          response->message = precondition_error;
+          return;
+        }
       }
     }
     std::string hold_warning;
@@ -753,6 +793,29 @@ private:
     std::shared_ptr<Trigger::Response> response)
   {
     forwardLiftSafetyRequest(request, response, lift_hold_client_, native_lift_hold_service_);
+  }
+
+  void handleLiftHostZeroProxy(
+    const std::shared_ptr<Trigger::Request> request,
+    std::shared_ptr<Trigger::Response> response)
+  {
+    std::unique_lock<std::mutex> command_lock;
+    if (!acquireCommandLock(command_lock)) {
+      response->success = false;
+      response->message = "another lower gateway command is already in progress";
+      return;
+    }
+    std::string error;
+    const auto result = callNativeServiceBounded<Trigger>(
+      request, lift_host_zero_client_, native_lift_host_zero_service_,
+      lift_host_zero_timeout_, error);
+    if (!result) {
+      response->success = false;
+      response->message = error;
+      return;
+    }
+    response->success = result->success;
+    response->message = result->message;
   }
 
   void handleLiftSetDriveZeroProxy(
@@ -1135,6 +1198,13 @@ private:
     message.cia402_state = driver.cia402_state;
     message.controller_mode = control_fresh ? control.mode : std::string();
     message.fault_reason = driver_fresh ? lift_safety.fault_reason : std::string();
+    // A controller-latched fault used to surface with fault_reason='' because this
+    // field is composed from the drive-side safety status, which stays empty when
+    // the drive has no fault code of its own (603Fh = 0).  Prefer the controller's
+    // own reason so a latched fault is never reported without an explanation.
+    if (message.fault_reason.empty() && control_fresh && !control.fault_reason.empty()) {
+      message.fault_reason = control.fault_reason;
+    }
     if (issues.empty()) {
       if (message.motion_blocked) {
         message.message = message.fault_reason.empty() ?
@@ -1468,6 +1538,7 @@ private:
   std::string native_lift_stop_service_;
   std::string native_lift_hold_service_;
   std::string native_lift_set_drive_zero_service_;
+  std::string native_lift_host_zero_service_;
   std::chrono::milliseconds power_timeout_{30000};
   std::chrono::milliseconds mode_timeout_{5000};
   std::chrono::milliseconds joint_timeout_{30000};
@@ -1476,6 +1547,7 @@ private:
   std::chrono::milliseconds lift_command_timeout_{5000};
   std::chrono::milliseconds lift_safety_timeout_{5000};
   std::chrono::milliseconds lift_set_drive_zero_timeout_{10000};
+  std::chrono::milliseconds lift_host_zero_timeout_{10000};
 
   std::mutex command_mutex_;
   rclcpp::CallbackGroup::SharedPtr command_service_callback_group_;
@@ -1491,6 +1563,7 @@ private:
   rclcpp::Client<Trigger>::SharedPtr lift_stop_client_;
   rclcpp::Client<Trigger>::SharedPtr lift_hold_client_;
   rclcpp::Client<Trigger>::SharedPtr lift_set_drive_zero_client_;
+  rclcpp::Client<Trigger>::SharedPtr lift_host_zero_client_;
   rclcpp::Service<SetRobotPower>::SharedPtr power_proxy_service_;
   rclcpp::Service<SetArmControlMode>::SharedPtr mode_proxy_service_;
   rclcpp::Service<JointBatchControl>::SharedPtr joint_batch_proxy_service_;
@@ -1502,6 +1575,7 @@ private:
   rclcpp::Service<Trigger>::SharedPtr lift_stop_proxy_service_;
   rclcpp::Service<Trigger>::SharedPtr lift_hold_proxy_service_;
   rclcpp::Service<Trigger>::SharedPtr lift_set_drive_zero_proxy_service_;
+  rclcpp::Service<Trigger>::SharedPtr lift_host_zero_proxy_service_;
 
   std::string lift_joint_name_{"joint_motor"};
   std::string native_lift_joint_name_{"joint_motor"};

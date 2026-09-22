@@ -21,7 +21,7 @@ find_package(Eigen3 REQUIRED)
 
 # ruckig headers & lib
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../thirdparty)
-find_library(RUCKIG_LIB 
+find_library(RUCKIG_LIB
     NAMES ruckig
     PATHS ${CMAKE_CURRENT_SOURCE_DIR}/../thirdparty/lib/ruckig
     NO_DEFAULT_PATH

@@ -5,21 +5,31 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import gc
 import math
 import mmap
 import os
 from pathlib import Path
 import pwd
 import re
+
+# Generated single source of truth for the CiA 402 status-word table (see
+# generate_lift_console_states.py, generated from cia402.cpp).  This console
+# used to keep its own copy of the mapping, which had drifted: it lacked 0x28
+# (the LD3M word 0x0638 reported while a drive fault is latched) and used
+# abbreviated state names that no longer matched the runtime parser.
+from lift_console_states import CIA402_STATE_MASK, CIA402_STATE_NAMES
 import select
 import signal
 import shutil
 import subprocess
 import sys
 import termios
+import threading
 import time
 from typing import Any
 import tty
+import unicodedata
 
 try:
     import yaml
@@ -395,6 +405,11 @@ def restore_configs(backups: list[tuple[Path, Path]], init_script: Path) -> None
 
 
 class SharedMemory:
+    # Mappings which still had live ctypes views at close() time.  Keeping a
+    # reference stops Python from retrying a failing close during garbage
+    # collection; the kernel releases the mapping at process exit.
+    deferred_close: list[mmap.mmap] = []
+
     def __init__(self, name: str, structure: type[ctypes.Structure]) -> None:
         self.path = Path("/dev/shm") / name
         self.structure = structure
@@ -417,13 +432,73 @@ class SharedMemory:
         return self
 
     def close(self) -> None:
+        """Release the mapping without ever raising on the console exit path.
+
+        A structure created with ``from_buffer()`` keeps an exported pointer
+        into the mapping, and so does every nested view of it
+        (``real.axis_state[slot]``, ``desire.axis_ctr[slot]`` and friends).
+        ``mmap.close()`` raises ``BufferError`` while any of those views is
+        still alive, which used to abort the exit path before the IGH driver
+        was stopped and left ``/dev/EtherCAT*`` open for the next run.  A
+        mapping that cannot be closed yet is kept referenced so the kernel
+        releases it when the process ends instead of raising again.
+        """
         self.value = None
         if self.file_map is not None:
-            self.file_map.close()
+            file_map = self.file_map
             self.file_map = None
+            try:
+                file_map.close()
+            except BufferError:
+                gc.collect()
+                try:
+                    file_map.close()
+                except BufferError:
+                    SharedMemory.deferred_close.append(file_map)
         if self.fd >= 0:
             os.close(self.fd)
             self.fd = -1
+
+
+def open_driver_shared_memory(
+    desire_block: SharedMemory,
+    real_block: SharedMemory,
+    driver_process: Any,
+    log_path: Path,
+    timeout_s: float = 10.0,
+) -> None:
+    """Wait for the IGH driver's shared-memory segments, then map both of them.
+
+    The mapping itself is retried instead of being gated on ``path.exists()``.
+    A POSIX segment exists as soon as it is created but is only grown to its
+    final size by a later ``truncate()``, so an existence check can still observe
+    a segment that is too small to map ("mmap length is greater than file
+    size").  The same happens on a cold start whenever another consumer left the
+    segment shrunk: the ROS ``erobot_hw`` interface truncates
+    ``Ethercat_axis_desire`` to its own 464-byte struct, while the IGH driver and
+    this tool both expect the 480-byte ABI.  Retrying lets the driver grow the
+    segment instead of failing the run.
+    """
+    if not math.isfinite(timeout_s) or timeout_s <= 0.0:
+        raise ValueError("shared-memory wait timeout must be positive and finite")
+    deadline = time.monotonic() + timeout_s
+    last_map_error = ""
+    while time.monotonic() < deadline:
+        if driver_process.poll() is not None:
+            raise RuntimeError(
+                f"igh_driver exited with code {driver_process.returncode}; see {log_path}"
+            )
+        try:
+            desire_block.open()
+            real_block.open()
+            return
+        except RuntimeError as exc:
+            last_map_error = str(exc)
+            desire_block.close()
+            real_block.close()
+            time.sleep(0.1)
+    detail = f" ({last_map_error})" if last_map_error else ""
+    raise RuntimeError(f"driver did not create shared memory; see {log_path}{detail}")
 
 
 def process_pids(binary: Path) -> list[int]:
@@ -471,13 +546,360 @@ def check_driver(config: dict[str, Any], config_path: Path) -> int:
 
 
 def state_name(status: int) -> str:
-    return {
-        0x08: "fault",
-        0x21: "ready",
-        0x23: "switched_on",
-        0x27: "operation_enabled",
-        0x40: "switch_on_disabled",
-    }.get(status & 0x006F, f"0x{status:04X}")
+    """CiA 402 state name for a raw 6041h status word.
+
+    Decoded from the generated table so this console cannot drift from the
+    runtime parser again; unknown words still print as hex.
+    """
+    decoded = CIA402_STATE_NAMES.get(status & CIA402_STATE_MASK)
+    return decoded if decoded is not None else f"0x{status:04X}"
+
+
+# CiA402 object 0x603F ("Error code") as reported by the arm drives.  The IGH
+# driver reads it over SDO and republishes it as axis_state[].axis_error_code,
+# and both the driver fault check and arm_status() treat any non-zero value as
+# a fault, so 0x0000 is the only value that means "healthy".
+#
+# The named entries below are the CiA 301 emergency codes that the DS402 drive
+# profiles reuse for 0x603F.  They are a reading aid, not a complete table: any
+# value that is missing here is a drive-vendor code, and the authoritative list
+# for these joints is the ZeroErr (eRunner) drive manual -- for example ZeroErr
+# documents the vendor-specific joint code 0x730F, which is not a CiA 301 code.
+AXIS_ERROR_NAMES = {
+    0x0000: "无错误",
+    0x2310: "过流",
+    0x3110: "主电源过压",
+    0x3120: "主电源欠压",
+    0x3210: "母线过压",
+    0x3220: "母线欠压",
+    0x4210: "过温",
+    0x7300: "编码器故障",
+}
+
+AXIS_ERROR_UNKNOWN = "厂商专有码,查ZeroErr手册"
+
+
+def axis_error_name(code: int) -> str:
+    return AXIS_ERROR_NAMES.get(code, AXIS_ERROR_UNKNOWN)
+
+
+# ---------------------------------------------------------------------------
+# Shared page vocabulary.
+#
+# This console and the upper-machine remote console
+# (junior_ws/tools/hardware/remote/remote_console.py) print the same two arm
+# pages, so the columns, the Chinese status words and the key footer below are
+# kept identical between the two implementations.  The raw hex code stays next
+# to the Chinese wording so logs and the drive manual can still be matched.
+# ---------------------------------------------------------------------------
+ARM_ENABLE_LABELS = {True: "使能", False: "失能"}
+
+UNKNOWN_ERROR_NAME = "未知故障码"
+
+# CiA 402 status word (masked with 0x006F) -> page label.  The same uppercase
+# names are used by the lower hardware server and by the upper remote console.
+ARM_STATE_LABELS = {
+    0x08: "FAULT",
+    0x21: "READY_TO_SWITCH_ON",
+    0x23: "SWITCHED_ON",
+    0x27: "OPERATION_ENABLED",
+    0x40: "SWITCH_ON_DISABLED",
+}
+
+
+def display_width(text: str) -> int:
+    """Return the terminal cell width of text (CJK glyphs occupy two cells)."""
+    return sum(2 if unicodedata.east_asian_width(char) in "WF" else 1 for char in text)
+
+
+def pad_display(text: str, width: int) -> str:
+    return text + " " * max(0, width - display_width(text))
+
+
+def arm_error_text(code: int) -> str:
+    value = int(code) & 0xFFFF
+    return f"0x{value:04X} ({AXIS_ERROR_NAMES.get(value, UNKNOWN_ERROR_NAME)})"
+
+
+# A drive that reports 0x603F only transiently (the ZeroLegacy profiles clear it
+# again after the driver's fault reset) makes a single frame show whichever axes
+# happened to be non-zero at that instant, so the page looks like the fault is
+# hopping between arms.  Keep the last non-zero code of every joint for this
+# many seconds and show its age, so one page lists every joint that is currently
+# in trouble.  C clears the memory immediately.  The upper-machine remote
+# console (junior_ws/tools/hardware/remote/remote_console.py) carries the same
+# constant, class, column width and footer.
+ARM_ERROR_LATCH_S = 5.0
+
+
+class ArmErrorLatch:
+    """Remember the most recent non-zero 0x603F code per joint."""
+
+    def __init__(self, window_s: float = ARM_ERROR_LATCH_S) -> None:
+        self.window_s = float(window_s)
+        self.latched: dict[str, tuple[int, float]] = {}
+
+    def update(self, joint: str, code: Any, now: float) -> None:
+        value = int(code) & 0xFFFF
+        if value:
+            self.latched[joint] = (value, now)
+
+    def cell(self, joint: str, code: Any, now: float) -> str:
+        """Return the Error column text: live code, aged latched code, or 无错误."""
+        value = int(code) & 0xFFFF
+        if value:
+            return arm_error_text(value)
+        entry = self.latched.get(joint)
+        if entry is not None:
+            latched_code, seen_at = entry
+            age = now - seen_at
+            if age <= self.window_s:
+                return f"{arm_error_text(latched_code)} {age:.1f}s前"
+            del self.latched[joint]
+        return arm_error_text(0)
+
+    def clear(self) -> int:
+        count = len(self.latched)
+        self.latched.clear()
+        return count
+
+
+# ---------------------------------------------------------------------------
+# Read-only bus voltage reporting.
+#
+# Every drive publishes its own DC link voltage and its own undervoltage limit
+# over SDO, and `ethercat upload` needs no sudo and keeps working while the IGH
+# driver owns the masters, so the console can show both without touching the
+# driver, the PDO mapping or the shared-memory ABI.  Values are millivolts:
+#
+#   EYOU axes     0x6079 voltage, 0x202D:01 undervoltage, 0x202D:03 overvoltage
+#   ZeroErr axes  0x6079 voltage, 0x3B6F minimum bus,  0x3B6E maximum bus
+#
+# On this machine the six ZeroErr axes require >= 44.0 V while the bus sits near
+# 39 V, so they report 0x3220 (母线欠压) instead of reaching Operation Enabled.
+# The nominal bus voltage is deliberately not printed: it is still being
+# confirmed against the supply.
+# ---------------------------------------------------------------------------
+BUS_VOLTAGE_INDEX = 0x6079
+ZEROERR_MIN_BUS_INDEX = 0x3B6F
+ZEROERR_MAX_BUS_INDEX = 0x3B6E
+EYOU_LIMIT_INDEX = 0x202D
+EYOU_UNDERVOLTAGE_SUBINDEX = 0x01
+EYOU_OVERVOLTAGE_SUBINDEX = 0x03
+ZEROERR_FAMILY = "ZeroErr"
+EYOU_FAMILY = "EYOU"
+BUS_VOLTAGE_REFRESH_S = 2.0
+ETHERCAT_UPLOAD_TIMEOUT_S = 1.0
+
+
+def parse_ethercat_upload(text: str) -> int | None:
+    """Return the integer value printed by `ethercat upload`, or None."""
+    for token in reversed(text.split()):
+        try:
+            return int(token, 0)
+        except ValueError:
+            continue
+    return None
+
+
+def read_ethercat_object(
+    master: int,
+    position: int,
+    index: int,
+    subindex: int = 0x00,
+    timeout_s: float = ETHERCAT_UPLOAD_TIMEOUT_S,
+) -> int | None:
+    """Read one SDO object with the read-only `ethercat` CLI.
+
+    Returns None when the tool is missing, the object does not exist on this
+    drive, or the request times out, so callers never have to distinguish those
+    cases: an absent value simply is not displayed.
+    """
+    command = [
+        "ethercat",
+        "upload",
+        "-m",
+        str(int(master)),
+        "-p",
+        str(int(position)),
+        f"0x{int(index):04X}",
+        f"0x{int(subindex):02X}",
+    ]
+    try:
+        completed = subprocess.run(
+            command, capture_output=True, text=True, timeout=timeout_s, check=False
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    return parse_ethercat_upload(completed.stdout)
+
+
+def arm_axis_master_positions(config: dict[str, Any]) -> dict[str, tuple[int, int]]:
+    """Map every arm joint name to its (master index, slave position)."""
+    masters = mapping(config).get("masters", {})
+    positions: dict[str, tuple[int, int]] = {}
+    slots = config.get("arm", {}).get("axis_slots", {})
+    for group, master_key in (("left_arm", "left_arm"), ("right_arm", "right_arm")):
+        master = masters.get(master_key)
+        if not isinstance(master, dict) or "index" not in master:
+            continue
+        for local, slot in enumerate(slots.get(group, [])):
+            positions[arm_axis_name(int(slot))] = (int(master["index"]), local)
+    return positions
+
+
+class BusVoltageMonitor:
+    """Poll the drives' DC link voltage and undervoltage limits off the loop.
+
+    The reads run on a background thread so the 50 Hz motion tick and the page
+    rendering never block on a subprocess.  ``snapshot()`` returns a plain dict
+    that is also the payload the hardware server forwards to the upper console.
+    """
+
+    def __init__(
+        self,
+        positions: dict[str, tuple[int, int]],
+        interval_s: float = BUS_VOLTAGE_REFRESH_S,
+    ) -> None:
+        self.positions = dict(positions)
+        self.interval_s = float(interval_s)
+        self.voltage_mv: dict[str, int] = {}
+        self.limits: dict[str, dict[str, Any]] = {}
+        self._thread: threading.Thread | None = None
+        self._stop_event = threading.Event()
+
+    def start(self) -> None:
+        if not self.positions or shutil.which("ethercat") is None:
+            return
+        self._thread = threading.Thread(target=self._run, name="bus-voltage", daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=3.0)
+            self._thread = None
+
+    def snapshot(self) -> dict[str, Any]:
+        return {
+            "voltage_mv": dict(self.voltage_mv),
+            "limits": {joint: dict(limit) for joint, limit in self.limits.items()},
+        }
+
+    def _run(self) -> None:
+        while not self._stop_event.is_set():
+            try:
+                self.sample_once()
+            except Exception:  # noqa: BLE001 - a read-only probe must never kill the console
+                pass
+            self._stop_event.wait(self.interval_s)
+
+    def sample_once(self) -> None:
+        """Refresh the voltage of every axis and probe each axis' limits once."""
+        voltage = dict(self.voltage_mv)
+        limits = dict(self.limits)
+        changed = False
+        for joint, (master, position) in self.positions.items():
+            if self._stop_event.is_set():
+                break
+            value = read_ethercat_object(master, position, BUS_VOLTAGE_INDEX)
+            if value is not None:
+                voltage[joint] = value
+                changed = True
+            if joint not in limits:
+                limit = probe_bus_voltage_limits(master, position)
+                if limit is not None:
+                    limits[joint] = limit
+                    changed = True
+        if changed:
+            self.voltage_mv = voltage
+            self.limits = limits
+
+
+def probe_bus_voltage_limits(master: int, position: int) -> dict[str, Any] | None:
+    """Return the drive's own bus voltage window, or None if it exposes none."""
+    zero_min = read_ethercat_object(master, position, ZEROERR_MIN_BUS_INDEX)
+    if zero_min is not None:
+        return {
+            "family": ZEROERR_FAMILY,
+            "min_mv": zero_min,
+            "max_mv": read_ethercat_object(master, position, ZEROERR_MAX_BUS_INDEX),
+        }
+    eyou_min = read_ethercat_object(
+        master, position, EYOU_LIMIT_INDEX, EYOU_UNDERVOLTAGE_SUBINDEX
+    )
+    if eyou_min is not None:
+        return {
+            "family": EYOU_FAMILY,
+            "min_mv": eyou_min,
+            "max_mv": read_ethercat_object(
+                master, position, EYOU_LIMIT_INDEX, EYOU_OVERVOLTAGE_SUBINDEX
+            ),
+        }
+    return None
+
+
+def bus_status_line(bus: Any) -> str | None:
+    """Format the shared voltage line: spread, per family count and limit."""
+    if not isinstance(bus, dict):
+        return None
+    voltage = bus.get("voltage_mv")
+    if not isinstance(voltage, dict) or not voltage:
+        return None
+    limits = bus.get("limits")
+    limits = limits if isinstance(limits, dict) else {}
+
+    readings: dict[str, int] = {}
+    for joint, value in voltage.items():
+        if isinstance(value, (int, float)):
+            readings[str(joint)] = int(value)
+    if not readings:
+        return None
+
+    family_of: dict[str, str] = {}
+    limit_of: dict[str, int] = {}
+    for joint in readings:
+        limit = limits.get(joint)
+        if not isinstance(limit, dict):
+            continue
+        min_mv = limit.get("min_mv")
+        if not isinstance(min_mv, (int, float)):
+            continue
+        family_of[joint] = str(limit.get("family", "?"))
+        limit_of[joint] = int(min_mv)
+
+    parts = [f"Bus {min(readings.values()) / 1000.0:.2f}-{max(readings.values()) / 1000.0:.2f}V"]
+    for family in sorted(set(family_of.values())):
+        joints = [joint for joint in family_of if family_of[joint] == family]
+        threshold = "/".join(
+            f"{mv / 1000.0:.1f}V" for mv in sorted({limit_of[joint] for joint in joints})
+        )
+        low = any(readings[joint] < limit_of[joint] for joint in joints)
+        parts.append(f"{family} {len(joints)}x min {threshold}{' LOW' if low else ''}")
+    return " | ".join(parts)
+
+
+def arm_state_label(axis: Any) -> str:
+    return ARM_STATE_LABELS.get(int(axis.ec_ctrstate) & 0x006F, "UNKNOWN")
+
+
+def arm_axis_enabled(axis: Any) -> bool:
+    return int(axis.ec_ctrstate) & 0x006F == 0x27
+
+
+def arm_ramp_target(current_units: int, requested_units: int, max_delta_units: float) -> int:
+    """Step an encoder target toward its request by at most one speed-limited step."""
+    difference = requested_units - current_units
+    if difference == 0:
+        return current_units
+    step = int(max_delta_units)
+    if step < 1:
+        step = 1
+    if abs(difference) <= step:
+        return requested_units
+    return current_units + (step if difference > 0 else -step)
 
 
 def arm_status(real: RealRegion, slots: list[int]) -> tuple[int, int, int, int]:
@@ -584,6 +1006,14 @@ def load_arm_zero_offsets(
 def save_arm_zero_offsets(
     config: dict[str, Any], config_path: Path, offsets: dict[int, int]
 ) -> None:
+    """Write the arm logical-zero table.
+
+    The interactive joint page is W/S/D/E/H/Q on both machines (the upper
+    remote console has no zero-mark key), so nothing binds this writer to a key
+    any more.  It is kept as the single authoritative writer for
+    `arm.zero_offset_file` so re-zeroing stays a supported, auditable operation
+    instead of a hand-edited YAML change.
+    """
     path = arm_zero_offset_path(config, config_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -616,23 +1046,67 @@ def render_arm_selection(
     units_per_rad: float,
     zero_offsets: dict[int, int],
     message: str,
+    error_latch: ArmErrorLatch | None = None,
+    bus: Any = None,
 ) -> None:
+    """Print the arm summary page (总表).
+
+    The columns, the Chinese status words, the all-axis keys (E/D/H), the latch
+    clear (C) and the footer are identical to the upper-machine remote console
+    (junior_ws/tools/hardware/remote/remote_console.py::render_arm_state).  The
+    Error column keeps the last non-zero code of every joint for
+    ARM_ERROR_LATCH_S seconds and shows its age, because the ZeroLegacy drives
+    report 0x603F only in ~100 ms bursts and one frame would otherwise show a
+    rotating subset of the joints that are in trouble.  The summary page has no
+    Space binding: Space was a no-op while nothing was moving and D already
+    aborts a move and disables all drives.
+    """
     print("\033[2J\033[H", end="")
-    print("Arm EtherCAT - select joint (Up/Down, Enter, Q)")
-    print("No.  Joint      Position(rad)  State                 Error")
-    for slot in slots:
+    now = time.monotonic()
+    enabled, faults, modes_ok, total = arm_status(real, slots)
+    selected_joint = arm_axis_name(selected_slot) if selected_slot in slots else "?"
+    print(f"ARM | SELECTED {slots.index(selected_slot) + 1}/{len(slots)}: {selected_joint}")
+    print("Select axis with Up/Down, Enter to control, Q to back")
+    print(f"Power: {real.ec_powerstate}  Enabled: {enabled}/{total}")
+    bus_line = bus_status_line(bus)
+    if bus_line:
+        print(bus_line)
+    print(
+        "No.  "
+        + pad_display("Joint", 10)
+        + pad_display("Enable", 8)
+        + pad_display("Status", 22)
+        + pad_display("Error", 26)
+        + "Position(rad)"
+    )
+    for index, slot in enumerate(slots):
         axis = real.axis_state[slot]
-        line = (
-            f"{slot + 1:02d}.  {arm_axis_name(slot):8s}  "
-            f"{arm_logical_position(axis.axis_position, zero_offsets[slot], units_per_rad): .5f}       "
-            f"{state_name(axis.ec_ctrstate):18s}  0x{axis.axis_error_code:04X}"
-        )
-        if slot == selected_slot:
-            line = f"\033[7m> {line}\033[0m"
+        marker = ">>" if slot == selected_slot else "  "
+        joint = arm_axis_name(slot)
+        error = axis.axis_error_code
+        if error_latch is None:
+            error_cell = arm_error_text(error)
         else:
-            line = f"  {line}"
-        print(line)
-    print(f"\n{message}")
+            error_latch.update(joint, error, now)
+            error_cell = error_latch.cell(joint, error, now)
+        print(
+            f"{marker}{index + 1:02d} "
+            + pad_display(joint, 10)
+            + pad_display(ARM_ENABLE_LABELS[arm_axis_enabled(axis)], 8)
+            + pad_display(arm_state_label(axis), 22)
+            + pad_display(error_cell, 26)
+            + f"{arm_logical_position(axis.axis_position, zero_offsets[slot], units_per_rad): .5f}"
+        )
+    if message:
+        print(f"\n{message}")
+    print(
+        "\nUp/Down SELECT  Enter CONTROL  E ENABLE ALL  D DISABLE ALL  "
+        "H HOME ALL  C CLEAR ERR  Q BACK"
+    )
+    # The launcher redirects stdout into a pipe (tee), so stdout is block
+    # buffered and one 1 KiB frame would stay invisible until the buffer fills
+    # or the process exits.  Flush every frame so the menu appears immediately.
+    sys.stdout.flush()
 
 
 def render_arm_control(
@@ -645,18 +1119,25 @@ def render_arm_control(
     max_speed_rad_s: float,
     message: str,
 ) -> None:
+    """Print the single-joint page.
+
+    The key set is exactly W/S/D/E/H/Q on both machines: W and S jog, D
+    disables, E enables, H returns the joint to its logical zero.
+    """
     axis = real.axis_state[slot]
     print("\033[2J\033[H", end="")
-    print(f"Arm EtherCAT - control {arm_axis_name(slot)} (slot {slot})")
-    print(f"Actual position : {arm_logical_position(axis.axis_position, zero_units, units_per_rad): .5f} rad")
-    print(f"Target position : {arm_logical_position(target_units, zero_units, units_per_rad): .5f} rad")
-    print(f"Zero offset     : {zero_units} units")
-    print(f"Drive state     : {state_name(axis.ec_ctrstate)} / mode 0x{axis.ec_modestate:02X}")
-    print(f"Power request   : {'ON' if desire.ec_poweron else 'OFF'}")
-    print(f"Max speed      : {max_speed_rad_s:.5f} rad/s")
-    print("\nE enable | W +step | S -step | H return zero | Z mark zero")
-    print("Space stop | Q back")
+    print(f"ARM | CONTROL {arm_axis_name(slot)}")
+    print(f"Power: {bool(desire.ec_poweron)}  Enabled: {ARM_ENABLE_LABELS[arm_axis_enabled(axis)]}")
+    print(f"Status: {arm_state_label(axis)}  Mode: 0x{axis.ec_modestate:02X}  Error: {arm_error_text(axis.axis_error_code)}")
+    print(f"Position(rad): {arm_logical_position(axis.axis_position, zero_units, units_per_rad): .5f}")
+    print(f"Target(rad)  : {arm_logical_position(target_units, zero_units, units_per_rad): .5f}")
+    print(f"Zero offset  : {zero_units} units")
+    print(f"Max speed    : {max_speed_rad_s:.5f} rad/s")
+    print("\nW +STEP  S -STEP  D DISABLE  E ENABLE  H HOME  Q BACK")
     print(message)
+    # Same reason as render_arm_selection: keep this frame visible while the
+    # console blocks on the next keypress.
+    sys.stdout.flush()
 
 
 def run_arm_test(config: dict[str, Any], config_path: Path) -> int:
@@ -685,20 +1166,19 @@ def run_arm_test(config: dict[str, Any], config_path: Path) -> int:
     real_block = SharedMemory(str(arm["shared_memory"]["real"]), RealRegion)
     real: RealRegion | None = None
     desire: DesireRegion | None = None
+    bus_monitor: BusVoltageMonitor | None = None
     try:
-        deadline = time.monotonic() + 10.0
-        while time.monotonic() < deadline:
-            if driver_process.poll() is not None:
-                raise RuntimeError(f"igh_driver exited with code {driver_process.returncode}; see {log_path}")
-            if desire_block.path.exists() and real_block.path.exists():
-                desire_block.open()
-                real_block.open()
-                break
-            time.sleep(0.1)
-        else:
-            raise RuntimeError(f"driver did not create shared memory; see {log_path}")
+        # Retry the mapping itself instead of gating it on path.exists(): see
+        # open_driver_shared_memory() for why an existing segment can still be
+        # too small to map, which used to make every first run of the console
+        # fail with "mmap length is greater than file size".
+        open_driver_shared_memory(desire_block, real_block, driver_process, log_path)
 
         slots = list(arm["axis_slots"]["left_arm"]) + list(arm["axis_slots"]["right_arm"])
+        # Read-only bus voltage / undervoltage limit display; the reads run on a
+        # background thread so the motion tick never waits for a subprocess.
+        bus_monitor = BusVoltageMonitor(arm_axis_master_positions(config))
+        bus_monitor.start()
         zero_offsets = load_arm_zero_offsets(config, config_path, slots)
         csp_mode = int(str(arm.get("csp_mode", "0x08")), 0)
         jog_step_rad = float(arm.get("jog_step_rad", 0.005))
@@ -884,31 +1364,16 @@ def run_arm_test(config: dict[str, Any], config_path: Path) -> int:
                     message = "Enable requested after synchronizing all 14 actual positions."
                     redraw = True
                     continue
-                if key == " ":
-                    hold_all_axes()
+                if key == "d":
+                    # D on the joint page does what D does on the summary page
+                    # and what the upper remote console's ARM_DISABLE does:
+                    # abort the move and disable all 14 drives.
+                    disable_all_axes()
                     target_units = real.axis_state[slot].axis_position
                     requested_target_units = target_units
                     motion_direction = 0
                     blocked_direction = 0
-                    message = "Stopped and holding measured position."
-                    redraw = True
-                    continue
-                if key == "z":
-                    motion_direction = 0
-                    hold_all_axes()
-                    real = real_block.value
-                    desire = desire_block.value
-                    assert real is not None and desire is not None
-                    zero_offsets[slot] = real.axis_state[slot].axis_position
-                    target_units = zero_offsets[slot]
-                    try:
-                        save_arm_zero_offsets(config, config_path, zero_offsets)
-                    except (OSError, ValueError) as exc:
-                        message = f"Zero not saved: {exc}"
-                    else:
-                        message = f"{arm_axis_name(slot)} zero saved at current position."
-                    target_units = real.axis_state[slot].axis_position
-                    requested_target_units = target_units
+                    message = "All 14 drives disabled; any move was aborted and targets hold."
                     redraw = True
                     continue
                 if key == "h":
@@ -958,78 +1423,311 @@ def run_arm_test(config: dict[str, Any], config_path: Path) -> int:
                 )
                 redraw = True
 
+        # All-axis console thresholds.  H on the main page reuses the same limits
+        # and the same stall semantics as H inside a single joint, so both paths
+        # behave identically; the only difference is that all 14 axes ramp at once.
+        all_limit_stall_timeout_s = float(arm.get("limit_stall_timeout_s", 0.5))
+        if not math.isfinite(all_limit_stall_timeout_s) or all_limit_stall_timeout_s <= 0.0:
+            raise ValueError("arm.limit_stall_timeout_s must be positive and finite")
+        all_limit_tolerance_units = arm_rad_to_units(
+            float(arm.get("limit_position_tolerance_rad", 0.001)), units_per_rad
+        )
+        if all_limit_tolerance_units <= 0:
+            raise ValueError("arm.limit_position_tolerance_rad must be positive")
+        all_stall_velocity_limit = max(1, arm_rad_to_units(0.002, units_per_rad))
+        all_enable_timeout_s = float(arm.get("enable_timeout_s", 8.0))
+        if not math.isfinite(all_enable_timeout_s) or all_enable_timeout_s <= 0.0:
+            raise ValueError("arm.enable_timeout_s must be positive and finite")
+
         with RawTerminal() as terminal:
-            message = "Use Up/Down to select one of 14 joints, Enter to control, Q to quit."
+            message = (
+                "E enables all 14 drives, then H returns every joint to its logical zero.\n"
+                "D disables all 14 drives and aborts any move; there is no Space key.\n"
+                "C clears the remembered error codes shown with an age suffix."
+            )
+            task = "idle"
+            task_deadline = 0.0
+            last_tick = 0.0
+            next_render = 0.0
+            error_latch = ArmErrorLatch()
+            ramp_target = {slot: 0 for slot in slots}
+            ramp_requested = {slot: 0 for slot in slots}
+            ramp_direction = {slot: 0 for slot in slots}
+            stall_blocked = {slot: 0 for slot in slots}
+            watch_position = {slot: 0 for slot in slots}
+            watch_started = {slot: 0.0 for slot in slots}
             while True:
                 real = real_block.value
                 desire = desire_block.value
                 assert real is not None and desire is not None
                 selected_slot = slots[selected_index]
-                render_arm_selection(real, slots, selected_slot, units_per_rad, zero_offsets, message)
-                key = terminal.read_key()
+                now = time.monotonic()
+                if task == "enabling":
+                    # Glue every target to its measured position while the drives
+                    # come up, so enabling itself can never command a movement.
+                    hold_all_axes()
+                    if all_axes_enabled():
+                        task = "idle"
+                        message = (
+                            "All 14 drives are enabled. Press H to send every joint to its logical "
+                            "zero, or Enter to control one joint."
+                        )
+                        next_render = 0.0
+                    elif now >= task_deadline:
+                        enabled, faults, modes_ok, total = arm_status(real, slots)
+                        task = "idle"
+                        message = (
+                            f"Enable timed out after {all_enable_timeout_s:.1f} s: {enabled}/{total} enabled, "
+                            f"{faults} faulted, {modes_ok}/{total} in CSP mode. Press D to disable all."
+                        )
+                        next_render = 0.0
+                elif task == "homing":
+                    enabled, faults, modes_ok, total = arm_status(real, slots)
+                    if enabled != total or faults != 0:
+                        hold_all_axes()
+                        task = "idle"
+                        message = (
+                            f"Homing aborted: {enabled}/{total} enabled, {faults} faulted. Every target "
+                            "was frozen at its measured position."
+                        )
+                        next_render = 0.0
+                    else:
+                        elapsed = min(max(now - last_tick, 0.0), 0.1)
+                        max_delta_units = max_speed_units_s * elapsed
+                        for slot in slots:
+                            axis = real.axis_state[slot]
+                            if stall_blocked[slot] != 0:
+                                continue
+                            ramp_target[slot] = arm_ramp_target(
+                                ramp_target[slot], ramp_requested[slot], max_delta_units
+                            )
+                            desire.axis_ctr[slot].ec_mode = csp_mode
+                            desire.axis_ctr[slot].axis_position = ramp_target[slot]
+                            desire.axis_ctr[slot].axis_velocity = 0
+                            desire.axis_ctr[slot].axis_effort = 0
+                            direction = ramp_direction[slot]
+                            if direction == 0:
+                                continue
+                            if (
+                                (axis.axis_position - watch_position[slot]) * direction
+                                >= all_limit_tolerance_units
+                            ):
+                                watch_position[slot] = axis.axis_position
+                                watch_started[slot] = now
+                                continue
+                            target_error = (ramp_requested[slot] - axis.axis_position) * direction
+                            if (
+                                now - watch_started[slot] >= all_limit_stall_timeout_s
+                                and target_error >= max(1, jog_step_units // 2)
+                                and abs(axis.axis_velocity) <= all_stall_velocity_limit
+                            ):
+                                ramp_target[slot] = axis.axis_position
+                                ramp_requested[slot] = axis.axis_position
+                                stall_blocked[slot] = direction
+                                desire.axis_ctr[slot].axis_position = axis.axis_position
+                                message = (
+                                    f"{arm_axis_name(slot)} stalled at "
+                                    f"{arm_logical_position(axis.axis_position, zero_offsets[slot], units_per_rad): .5f} rad "
+                                    "and is now held; the other joints keep homing. Press D to disable all."
+                                )
+                                next_render = 0.0
+                        last_tick = now
+                        settled = all(
+                            ramp_target[slot] == ramp_requested[slot]
+                            and abs(real.axis_state[slot].axis_position - ramp_requested[slot])
+                            <= all_limit_tolerance_units
+                            for slot in slots
+                        )
+                        if settled:
+                            stalled = [
+                                arm_axis_name(slot) for slot in slots if stall_blocked[slot] != 0
+                            ]
+                            task = "idle"
+                            message = (
+                                "All 14 joints are back at their logical zero."
+                                if not stalled
+                                else "Homing stopped with these joints short of zero: " + ", ".join(stalled)
+                            )
+                            next_render = 0.0
+                        elif now >= task_deadline:
+                            hold_all_axes()
+                            for slot in slots:
+                                ramp_target[slot] = real.axis_state[slot].axis_position
+                                ramp_requested[slot] = ramp_target[slot]
+                            task = "idle"
+                            message = (
+                                "Homing timed out; every target was frozen at its measured position. "
+                                "Press D to disable all."
+                            )
+                            next_render = 0.0
+                if task == "homing":
+                    at_zero = sum(
+                        1
+                        for slot in slots
+                        if abs(real.axis_state[slot].axis_position - zero_offsets[slot])
+                        <= all_limit_tolerance_units
+                    )
+                    furthest_units = max(
+                        abs(zero_offsets[slot] - real.axis_state[slot].axis_position) for slot in slots
+                    )
+                    shown_message = (
+                        f"{message}\n{at_zero}/{len(slots)} joints at zero; furthest joint is still "
+                        f"{furthest_units / units_per_rad:.5f} rad away."
+                    )
+                elif task == "enabling":
+                    enabled, _faults, _modes, total = arm_status(real, slots)
+                    shown_message = f"{message}\n{enabled}/{total} drives enabled so far."
+                else:
+                    shown_message = message
+                if task == "idle":
+                    # Nothing is moving, so a blocking read keeps the console idle.
+                    render_arm_selection(real, slots, selected_slot, units_per_rad, zero_offsets, shown_message, error_latch, bus_monitor.snapshot())
+                    key = terminal.read_key()
+                else:
+                    # A task is running: tick the trajectory at 50 Hz and redraw at 10 Hz.
+                    if now >= next_render:
+                        render_arm_selection(real, slots, selected_slot, units_per_rad, zero_offsets, shown_message, error_latch, bus_monitor.snapshot())
+                        next_render = now + 0.1
+                    key = terminal.read_key(0.02)
                 if key == "up":
                     selected_index = (selected_index - 1) % len(slots)
                 elif key == "down":
                     selected_index = (selected_index + 1) % len(slots)
+                elif key == "c":
+                    message = f"Latched error memory cleared ({error_latch.clear()} joint(s))."
                 elif key == "enter":
-                    message = control_selected_joint(terminal, selected_slot)
+                    if task == "idle":
+                        message = control_selected_joint(terminal, selected_slot)
+                    else:
+                        message = "Busy: press D to disable all 14 drives and abort the current task."
+                elif key == "e":
+                    if task != "idle":
+                        message = "Busy: press D to disable all 14 drives and abort the current task."
+                    elif synchronize_targets_to_feedback():
+                        desire = desire_block.value
+                        assert desire is not None
+                        desire.ec_poweron = 1
+                        task = "enabling"
+                        task_deadline = now + all_enable_timeout_s
+                        message = (
+                            "Enabling all 14 drives; every target stays at its measured position until "
+                            "they are all enabled."
+                        )
+                    else:
+                        message = "Enable refused: waiting for valid feedback from all 14 drives."
+                elif key == "d":
+                    task = "idle"
+                    disable_all_axes()
+                    message = "All 14 drives are disabled; any move was aborted and targets hold."
+                elif key == "h":
+                    if task != "idle":
+                        message = "Busy: press D to disable all 14 drives and abort the current task."
+                    elif not all_axes_enabled():
+                        message = "Home refused: press E and wait until all 14 drives are enabled."
+                    else:
+                        for slot in slots:
+                            ramp_target[slot] = real.axis_state[slot].axis_position
+                            ramp_requested[slot] = zero_offsets[slot]
+                            direction = 0
+                            if ramp_requested[slot] > ramp_target[slot]:
+                                direction = 1
+                            elif ramp_requested[slot] < ramp_target[slot]:
+                                direction = -1
+                            ramp_direction[slot] = direction
+                            stall_blocked[slot] = 0
+                            watch_position[slot] = ramp_target[slot]
+                            watch_started[slot] = now
+                        longest_rad = max(
+                            abs(zero_offsets[slot] - ramp_target[slot]) for slot in slots
+                        ) / units_per_rad
+                        task = "homing"
+                        last_tick = now
+                        task_deadline = now + max(30.0, longest_rad / max_speed_rad_s * 1.5 + 10.0)
+                        message = (
+                            f"Homing all 14 joints to their logical zero at {max_speed_rad_s:.5f} rad/s "
+                            f"(longest travel {longest_rad:.5f} rad). D aborts and disables all."
+                        )
                 elif key == "q":
+                    task = "idle"
                     disable_all_axes()
                     break
         return 0
     finally:
-        if desire_block.value is not None:
-            desire_block.value.ec_poweron = 0
-        time.sleep(float(arm.get("disable_settle_s", 1.0)))
+        # Drop the ctypes views this frame still references (the homing branch
+        # keeps `axis` alive) so the mappings can really be closed, then hand
+        # every remaining release step to a helper that cannot raise.
+        axis = None
         desire = None
         real = None
-        desire_block.close()
-        real_block.close()
-        if driver_process.poll() is None:
-            driver_process.send_signal(signal.SIGINT)
+        if bus_monitor is not None:
+            bus_monitor.stop()
+        for warning in release_arm_test_resources(
+            desire_block=desire_block,
+            real_block=real_block,
+            driver_process=driver_process,
+            log_file=log_file,
+            disable_settle_s=float(arm.get("disable_settle_s", 1.0)),
+        ):
+            print(f"WARNING: {warning}", file=sys.stderr)
+
+
+def release_arm_test_resources(
+    *,
+    desire_block: "SharedMemory",
+    real_block: "SharedMemory",
+    driver_process: subprocess.Popen[bytes],
+    log_file: Any,
+    disable_settle_s: float,
+) -> list[str]:
+    """Release everything run_arm_test owns; never raise.
+
+    Order matters and each step is independently guarded.  A failure while
+    closing the shared-memory mappings must never skip stopping the IGH
+    driver: a leftover driver keeps ``/dev/EtherCAT*`` open, which blocks the
+    non-ROS TCP server ("hardware is already active") and the next console run.
+    Returns the warnings to print; the caller reports them after cleanup.
+    """
+    warnings: list[str] = []
+    try:
+        if desire_block.value is not None:
+            desire_block.value.ec_poweron = 0
+        time.sleep(max(0.0, float(disable_settle_s)))
+    except Exception as exc:  # noqa: BLE001 - cleanup must continue
+        warnings.append(f"power-off request failed: {exc}")
+    for name, block in (("desire", desire_block), ("real", real_block)):
+        try:
+            block.close()
+        except Exception as exc:  # noqa: BLE001 - cleanup must continue
+            warnings.append(f"{name} shared-memory close failed: {exc}")
+    if driver_process.poll() is None:
+        driver_process.send_signal(signal.SIGINT)
+        try:
+            driver_process.wait(timeout=3.0)
+        except subprocess.TimeoutExpired:
+            warnings.append("igh_driver did not stop within 3 s of SIGINT; killing it")
+            driver_process.kill()
             try:
-                driver_process.wait(timeout=3.0)
+                driver_process.wait(timeout=2.0)
             except subprocess.TimeoutExpired:
-                driver_process.kill()
+                warnings.append("igh_driver survived SIGKILL; it may still hold /dev/EtherCAT*")
+    try:
         log_file.close()
+    except OSError as exc:
+        warnings.append(f"driver log close failed: {exc}")
+    return warnings
 
 
 def run_lift_test(config: dict[str, Any], config_path: Path) -> int:
-    lift = config["lift"]
-    binary = (config_path.parent / str(lift["cli_binary"])).resolve()
-    if not binary.is_file() or not os.access(binary, os.X_OK):
-        raise RuntimeError(f"lift CLI binary was not found or is not executable: {binary}")
+    """Run the unified lift console (W/S/D/E/H/Z/Q) over the EtherCAT CLI.
 
-    owner_name = os.environ.get("SUDO_USER") or os.environ.get("USER")
-    try:
-        owner = pwd.getpwnam(owner_name) if owner_name else pwd.getpwuid(os.getuid())
-    except KeyError:
-        owner = pwd.getpwuid(os.getuid())
-    zero_offset_file = (
-        Path(owner.pw_dir) / ".local/state/joint_controller/lift_zero_offset.cfg"
-    )
-    command = [
-        str(binary),
-        "--interface", str(lift["interface"]),
-        "--master", str(lift["master"]),
-        "--alias", str(lift["slave_alias"]),
-        "--position", str(lift["slave_position"]),
-        "--min-position", str(lift["min_position_m"]),
-        "--max-position", str(lift["max_position_m"]),
-        "--zero-offset-file", str(zero_offset_file),
-        "--zero-offset-uid", str(owner.pw_uid),
-        "--zero-offset-gid", str(owner.pw_gid),
-    ]
-    env = os.environ.copy()
-    library_dir = str(config.get("ethercat", {}).get("library_dir", "/usr/local/etherlab/lib"))
-    env["LD_LIBRARY_PATH"] = library_dir + ":" + env.get("LD_LIBRARY_PATH", "")
-    print("Lift test uses the standalone CSV EtherCAT CLI. It is ROS-free.")
-    return subprocess.run(
-        command,
-        cwd=config_path.parent.parent.parent,
-        check=False,
-        env=env,
-    ).returncode
+    The console keeps the control logic in one script on both machines and
+    drives `lift_ethercat_cli --command-mode`; the CLI stays the single owner
+    of EtherCAT and of the CiA 402 state machine.  See lift_console.py.
+    """
+    from lift_console import build_parser, run_console
+
+    args = build_parser().parse_args(["--config", str(config_path)])
+    return run_console(args)
 
 
 def self_test(config_path: Path) -> int:

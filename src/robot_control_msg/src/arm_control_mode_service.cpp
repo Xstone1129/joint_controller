@@ -203,7 +203,8 @@ private:
 
       if (!has_fresh_mode_status) {
         response->success = false;
-        response->message = "EFFORT mode rejected: /arm/control_mode_status is unavailable or stale";
+        response->message =
+          "EFFORT mode rejected: /arm/control_mode_status is unavailable or stale";
         return;
       }
 
@@ -258,9 +259,10 @@ private:
     ModeStatus latest_status = mode_before;
     std::unique_lock<std::mutex> status_lock(status_mutex_);
     while (rclcpp::ok()) {
-      status_condition_.wait_until(status_lock, deadline, [this, generation_before]() {
-        return mode_status_generation_ > generation_before;
-      });
+      status_condition_.wait_until(
+        status_lock, deadline, [this, generation_before]() {
+          return mode_status_generation_ > generation_before;
+        });
 
       if (mode_status_generation_ > generation_before) {
         latest_status = last_mode_status_;

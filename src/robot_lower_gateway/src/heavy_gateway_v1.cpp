@@ -1361,10 +1361,17 @@ void HeavyGatewayV1::handleRelease(
       const bool released = state_condition_.wait_for(
         lock, controller_ack_timeout_, [this]() {return !lease_active_;});
       if (!released) {
-        state_ = Status::STATE_FAULT;
-        detail_ = "lease release failed: controller HOLD ack timeout";
-        response->message = detail_;
-        return;
+        // A missing HOLD acknowledgement must not leave a revocation pending
+        // forever: pending revocation disables the lease expiry path, so the
+        // lease would stay active with a stale owner and every later acquire
+        // from a new owner would be refused as "owner or lease mismatch".
+        // The physical stop is still owned by the upper watchdog; release the
+        // remote lease deterministically and report why.
+        const std::string detail = "explicit_release_ack_timeout: controller HOLD ack timeout";
+        last_controller_submission_result_ = "not submitted: " + detail;
+        clearHeavyLeaseLocked(detail, std::chrono::steady_clock::now());
+        release_detail = detail;   // consumed by the released_without_hold reply below
+        released_without_hold = true;
       }
     }
   }
@@ -1673,8 +1680,15 @@ void HeavyGatewayV1::watchdogAndFeedbackTick()
       beginSafetyHoldLocked("command_timeout: FOLLOWING to HOLD", false);
       status_changed = true;
     }
+    // An in-flight revocation must NOT be able to disable lease expiry: if the
+    // safety HOLD that carries the revocation is never acknowledged, gating the
+    // expiry on !revoke_after_ack_ leaves lease_active_ true forever.  The lower
+    // then rejects every acquire from a new owner ("owner or lease mismatch") and
+    // the only recovery was a full stack restart.  Expiry now always applies; it
+    // performs the same safety HOLD plus revoke that the pending revocation
+    // wanted, so the outcome is unchanged and bounded in time.
     if (lease_active_ && last_command_time_.time_since_epoch().count() != 0 &&
-      now >= lease_deadline_ && !revoke_after_ack_)
+      now >= lease_deadline_)
     {
       ++lease_expiry_count_;
       RCLCPP_ERROR(
@@ -1690,6 +1704,30 @@ void HeavyGatewayV1::watchdogAndFeedbackTick()
       beginSafetyHoldLocked(
         "execution lease expired after " +
         std::to_string(execution_lease_timeout_.count()) + " ms without an accepted command", true);
+      status_changed = true;
+    }
+    if (lease_active_ && revoke_after_ack_ && pending_command_valid_ &&
+      now - pending_command_time_ > controller_ack_timeout_)
+    {
+      // Bounded fallback for a revocation whose HOLD is never acknowledged.
+      // clearHeavyLeaseLocked() otherwise only runs from the acknowledgement
+      // handler, so one lost acknowledgement left the lease active forever:
+      // the lower kept reporting LEASED_HOLD with a zero remaining lease, a new
+      // owner could never acquire, and only a full restart helped.
+      const std::string reason = pending_lease_clear_reason_.empty() ?
+        "internal_state_invariant_failure" : pending_lease_clear_reason_;
+      RCLCPP_WARN(
+        logger_,
+        "Heavy V1 lease revocation timed out waiting for the controller HOLD acknowledgement "
+        "(%.1f ms); clearing owner='%s' lease='%s' without it",
+        std::chrono::duration<double, std::milli>(now - pending_command_time_).count(),
+        owner_id_.c_str(), lease_id_.c_str());
+      clearHeavyLeaseLocked(reason + " (ack timeout fallback)", now);
+      pending_command_valid_ = false;
+      pending_command_is_user_ = false;
+      staged_command_valid_ = false;
+      revoke_after_ack_ = false;
+      release_gate = true;
       status_changed = true;
     }
     if (lease_active_ && pending_command_valid_ &&

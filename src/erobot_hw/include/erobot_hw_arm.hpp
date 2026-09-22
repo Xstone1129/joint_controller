@@ -48,21 +48,29 @@ class Robot_arm_Ethercat_Hardware : public hardware_interface::SystemInterface
 public:
   RCLCPP_SHARED_PTR_DEFINITIONS(Robot_arm_Ethercat_Hardware);
 
-  hardware_interface::CallbackReturn on_init(const hardware_interface::HardwareInfo & info) override;
+  hardware_interface::CallbackReturn on_init(
+    const hardware_interface::HardwareInfo & info) override;
 
-  hardware_interface::CallbackReturn on_configure(const rclcpp_lifecycle::State & previous_state) override;
+  hardware_interface::CallbackReturn on_configure(const rclcpp_lifecycle::State & previous_state)
+  override;
 
   std::vector<hardware_interface::StateInterface> export_state_interfaces() override;
 
   std::vector<hardware_interface::CommandInterface> export_command_interfaces() override;
 
-  hardware_interface::CallbackReturn on_activate(const rclcpp_lifecycle::State & previous_state) override;
+  hardware_interface::CallbackReturn on_activate(const rclcpp_lifecycle::State & previous_state)
+  override;
 
-  hardware_interface::CallbackReturn on_deactivate(const rclcpp_lifecycle::State & previous_state) override;
+  hardware_interface::CallbackReturn on_deactivate(const rclcpp_lifecycle::State & previous_state)
+  override;
 
-  hardware_interface::return_type read(const rclcpp::Time & time, const rclcpp::Duration & period) override;
+  hardware_interface::return_type read(
+    const rclcpp::Time & time,
+    const rclcpp::Duration & period) override;
 
-  hardware_interface::return_type write(const rclcpp::Time & time, const rclcpp::Duration & period) override;
+  hardware_interface::return_type write(
+    const rclcpp::Time & time,
+    const rclcpp::Duration & period) override;
 
   //shm
   void init_shm_desire();
@@ -88,12 +96,12 @@ private:
   std::vector<std::size_t> joint_shared_slots_;
 
   // shm_desire
-  ec_app_desire_reg_t* joint_shm_desire_ptr;
+  ec_app_desire_reg_t * joint_shm_desire_ptr;
   std::shared_ptr<mapped_region> mapped_region_desire_ptr;
   std::shared_ptr<shared_memory_object> shm_desire_ptr;
 
   // shm_real
-  ec_app_real_reg_t* joint_shm_real_ptr;
+  ec_app_real_reg_t * joint_shm_real_ptr;
   std::shared_ptr<mapped_region> mapped_region_real_ptr;
   std::shared_ptr<shared_memory_object> shm_real_ptr;
 

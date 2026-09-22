@@ -1,5 +1,4 @@
 #include "joint_hardware/lift_hardware.hpp"
-#include <future>
 
 #include <algorithm>
 #include <cctype>
@@ -1041,106 +1040,6 @@ bool LiftHardware::validate_brake_parameters()
   return true;
 }
 
-std::string LiftHardware::read_drive_objects_text()
-{
-  // Read-only CoE object-dictionary diagnostics.
-  //
-  // Added while chasing "the lift reports zero wherever it is powered on": the
-  // LD3M absolute-encoder configuration decides whether the drive keeps its
-  // position across a power cycle, and that cannot be told from the robot side.
-  // The drive panel is not always readable and a standalone CoE tool needs
-  // exclusive EtherCAT access, i.e. a maintenance window.  These are plain SDO
-  // reads; nothing is written and motion is never enabled.
-  struct Entry
-  {
-    uint16_t index;
-    uint8_t subindex;
-    const char * name;
-  };
-  static const Entry kEntries[] = {
-    {0x2015, 0x00, "P00.15 absolute encoder setting"},
-    {0x6060, 0x00, "6060h mode of operation"},
-    {0x6061, 0x00, "6061h mode display"},
-    {0x603F, 0x00, "603Fh error code"},
-    {0x6502, 0x00, "6502h supported drive modes"},
-    {0x5500, 0x01, "5500h:01 multi-turn count"},
-    {0x5500, 0x02, "5500h:02 single-turn position"},
-    {0x2663, 0x00, "P06.63 multi-turn upper limit"},
-    {0x6064, 0x00, "6064h position actual value"},
-  };
-  const auto to_hex = [](uint64_t value, int width) {
-      std::string text;
-      for (int shift = (width - 1) * 4; shift >= 0; shift -= 4) {
-        const int nibble = static_cast<int>((value >> shift) & 0xFU);
-        text.push_back(
-          nibble < 10 ? static_cast<char>('0' + nibble)
-                      : static_cast<char>('A' + nibble - 10));
-      }
-      return text;
-    };
-
-  std::ostringstream status;
-  for (const auto & entry : kEntries) {
-    std::vector<uint8_t> bytes;
-    const bool ok = backend_ && backend_->read_sdo(entry.index, entry.subindex, bytes);
-    status << "0x" << to_hex(entry.index, 4) << ":" << to_hex(entry.subindex, 2)
-           << " " << entry.name << " = ";
-    if (!ok) {
-      status << "READ_FAILED(" << (backend_ ? backend_->error_message() : "no backend") << ")";
-    } else {
-      uint64_t raw = 0;
-      for (size_t i = 0; i < bytes.size() && i < 8; ++i) {
-        raw |= static_cast<uint64_t>(bytes[i]) << (8 * i);
-      }
-      status << "0x" << to_hex(raw, static_cast<int>(bytes.size()) * 2) << " (" << raw;
-      if (bytes.size() == 4) {
-        status << " / " << static_cast<int32_t>(raw);
-      } else if (bytes.size() == 2) {
-        status << " / " << static_cast<int16_t>(raw);
-      }
-      status << ")";
-    }
-    status << "; ";
-  }
-  return status.str();
-}
-
-void LiftHardware::handle_read_drive_objects(
-  const std::shared_ptr<std_srvs::srv::Trigger::Request>,
-  std::shared_ptr<std_srvs::srv::Trigger::Response> response)
-{
-  constexpr auto kReadTimeout = std::chrono::seconds(3);
-
-  // Never stack up reads: a request the master has not serviced yet would
-  // otherwise spawn another blocked worker on every call.
-  if (sdo_read_future_ && sdo_read_future_->valid() &&
-    sdo_read_future_->wait_for(std::chrono::milliseconds(0)) != std::future_status::ready)
-  {
-    response->success = false;
-    response->message =
-      "a previous OD read is still pending; the EtherCAT master has not serviced it yet";
-    return;
-  }
-
-  auto pending = std::make_shared<std::future<std::string>>(
-    std::async(std::launch::async, [this]() { return read_drive_objects_text(); }));
-  sdo_read_future_ = pending;
-  if (pending->wait_for(kReadTimeout) != std::future_status::ready) {
-    response->success = false;
-    response->message =
-      "OD read did not complete within 3 s: the IGH SDO upload is waiting for the "
-      "master to service it, which the realtime ownership of the master can delay "
-      "indefinitely. No data was written and the drive was not disturbed.";
-    RCLCPP_WARN(logger_, "%s", response->message.c_str());
-    return;
-  }
-
-  const std::string text = pending->get();
-  response->success = text.find("READ_FAILED") == std::string::npos;
-  response->message = text;
-  RCLCPP_INFO(logger_, "drive object read: %s", response->message.c_str());
-}
-
 bool LiftHardware::read_validated_sdo(
   uint16_t index, uint8_t subindex, uint32_t & value, bool allow_zero)
 {
@@ -1428,18 +1327,11 @@ hardware_interface::return_type LiftHardware::read(
   const bool reset_search_active = reset_velocity_request_.load(std::memory_order_acquire);
   const double reset_search_start =
     reset_search_start_position_m_.load(std::memory_order_acquire);
-  // While a bounded homing search is active the reachable envelope is the
-  // search window itself, not the configured software range: the window is what
-  // bounds the motion (reset_max_search_travel_m above the start, the full
-  // software span plus that travel below it).  This keeps the search usable
-  // when the drive powered up away from its datum, which is exactly the case
-  // homing exists to repair, without ever giving the carriage unbounded travel.
-  const bool reset_search_window = reset_search_active &&
-    position >= std::min(reset_search_start, position_min_m_) - command_epsilon_m_ &&
+  const bool reset_upper_override = reset_search_active &&
+    position >= reset_search_start - command_epsilon_m_ &&
     position <= reset_search_start + reset_max_search_travel_m_ + command_epsilon_m_;
-  const bool position_outside_limits = !reset_search_window &&
-    (position < position_min_m_ - command_epsilon_m_ ||
-    position > position_max_m_ + command_epsilon_m_);
+  const bool position_outside_limits = position < position_min_m_ - command_epsilon_m_ ||
+    (position > position_max_m_ + command_epsilon_m_ && !reset_upper_override);
   const bool was_outside_limits = position_limit_violation_.exchange(
     position_outside_limits, std::memory_order_acq_rel);
   if (position_outside_limits) {
@@ -2061,20 +1953,10 @@ hardware_interface::return_type LiftHardware::write(
 
 bool LiftHardware::complete_pending_zero()
 {
-  // The brake-unlocked guard only makes sense when this controller actually
-  // commands the brake.  With brake_control_enabled=false (the LD3M-EC wiring on
-  // this machine, where "brake_control_enabled: false" leaves BR+/BR- to the
-  // drive) brake_unlocked_ can never become false, so requiring it made every
-  // "set the current position as zero" request time out in the caller
-  // ("timed out before fresh near-zero feedback confirmation") and the operator
-  // could never re-zero the lift by hand.  In that configuration the controlled
-  // drive disable plus fresh, stationary feedback is the safe condition.
-  const bool brake_lock_satisfied = brake_control_enabled_ ?
-    !brake_unlocked_.load(std::memory_order_acquire) : true;
   if (!active_.load(std::memory_order_acquire) ||
     !zero_request_pending_.load(std::memory_order_acquire) ||
     !zero_disable_observed_.load(std::memory_order_acquire) ||
-    !brake_lock_satisfied || !feedback_is_fresh() ||
+    brake_unlocked_.load(std::memory_order_acquire) || !feedback_is_fresh() ||
     std::abs(feedback_velocity_mps_.load(std::memory_order_acquire)) >
     stationary_velocity_threshold_mps_)
   {
@@ -2145,15 +2027,6 @@ void LiftHardware::apply_pending_zero_offset()
   filtered_velocity_mps_ = 0.0;
   last_target_wire_rpm_ = 0.0;
   last_target_position_m_ = position;
-  // This is the frame change `lift reset` produces.  `LiftClient.reset()`
-  // finishes with `/lift_reset_zero` -> handle_reset_zero(), which persists the
-  // current 6064h as a host zero offset, and this cycle rebases the ROS frame
-  // on it: a carriage that was reported at -0.4 is suddenly reported at 0.0
-  // while every upstream setpoint still says -0.4.  Bump the frame generation
-  // so LiftController re-seats instead of chasing the old target on the next
-  // `lift power on`.  Only the counter is touched here because this is the
-  // real-time cycle; the 100 ms status timer publishes it.
-  zero_generation_.fetch_add(1, std::memory_order_acq_rel);
 }
 
 bool LiftHardware::target_is_at_limit(double position, double target) const noexcept
@@ -2242,13 +2115,6 @@ void LiftHardware::start_service_thread()
       const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
       std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
       handle_reset_zero(request, response);
-    });
-  read_drive_objects_service_ = service_node_->create_service<std_srvs::srv::Trigger>(
-    "/lift_read_drive_objects",
-    [this](
-      const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
-      std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
-      handle_read_drive_objects(request, response);
     });
   estop_service_ = service_node_->create_service<std_srvs::srv::Trigger>(
     "/joint/safety/estop",
@@ -2383,7 +2249,6 @@ void LiftHardware::publish_driver_status()
          << ",\"command_position\":" << command_position_atomic_.load()
          << ",\"command_velocity\":" << command_velocity_atomic_.load()
          << ",\"command_acceleration\":" << command_acceleration_atomic_.load()
-         << ",\"zero_generation\":" << zero_generation_.load(std::memory_order_acquire)
          << ",\"filtered_velocity\":" << feedback_velocity_mps_.load()
          << ",\"target_rpm\":" << target_wire_rpm_atomic_.load()
          << ",\"target_velocity_units\":" << target_velocity_units_atomic_.load()
@@ -2511,30 +2376,11 @@ void LiftHardware::handle_reset_velocity(
       response->message = "reset velocity refused because PDO feedback is stale";
       return;
     }
-    // Homing is the documented software recovery path: the photoelectric zero
-    // reference is lost whenever the drive powers up away from its datum, which
-    // parks the carriage outside the configured range and used to make this
-    // service refuse.  Allow the search to start from outside the range, but
-    // only inside the same bounded window the search itself is restricted to
-    // (reset_max_search_travel_m), so the carriage can never be driven
-    // unbounded toward a lost datum.
-    {
-      const double homing_start = feedback_position_m_.load(std::memory_order_acquire);
-      // The searchable envelope is the configured range widened by one bounded
-      // search travel in either direction; the search itself is then capped at
-      // reset_max_search_travel_m from wherever it starts.  The upper bound must
-      // tolerate a start slightly above position_max_m_, because a drive that
-      // powered up away from its datum reports exactly that.
-      const bool homing_window =
-        homing_start <= position_max_m_ + reset_max_search_travel_m_ + command_epsilon_m_ &&
-        homing_start >= position_min_m_ - reset_max_search_travel_m_ - command_epsilon_m_;
-      if (!homing_window) {
-        response->success = false;
-        response->message =
-          "reset velocity refused because the current position is outside the bounded homing "
-          "search window; move the lift toward the valid range first";
-        return;
-      }
+    if (position_limit_violation_.load(std::memory_order_acquire)) {
+      response->success = false;
+      response->message =
+        "reset velocity refused outside software limits; use normal controlled motion toward the valid range";
+      return;
     }
     if (motion_blocked_.load(std::memory_order_acquire)) {
       response->success = false;
@@ -2603,13 +2449,11 @@ void LiftHardware::handle_reset_zero(
     response->message = "zero refused while emergency stop is latched";
     return;
   }
-  // The host zero offset is a pure software coordinate (the current 6064h is
-  // stored and the ROS frame is rebased); it does not require this controller to
-  // own the brake.  Refusing whenever brake_control_enabled=false—the LD3M-EC
-  // wiring on this machine—made "set the current position as zero" impossible:
-  // the caller always timed out with "timed out before fresh near-zero feedback
-  // confirmation".  The controlled drive stop plus fresh, stationary feedback
-  // below is the safety condition that actually matters here.
+  if (!brake_control_enabled_) {
+    response->success = false;
+    response->message = "zero refused because brake_control_enabled is false";
+    return;
+  }
   if (!feedback_is_fresh() ||
     std::abs(feedback_velocity_mps_.load(std::memory_order_acquire)) >
     stationary_velocity_threshold_mps_)
@@ -2842,19 +2686,6 @@ void LiftHardware::handle_set_drive_zero(
     return;
   }
   drive_zero_pending_.store(false, std::memory_order_release);
-  // P00.15=9 invalidates the drive-side coordinate: the LD3M manual marks the
-  // write effective only after a power restart, so whatever the drive reports
-  // after that is a new origin.  Treat every retained setpoint as stale now
-  // instead of leaving a target for the next `lift power on` to chase; this
-  // runs on the service thread, so publishing the new generation is safe.
-  const uint64_t zero_generation =
-    zero_generation_.fetch_add(1, std::memory_order_acq_rel) + 1U;
-  publish_driver_status();
-  RCLCPP_WARN(
-    logger_,
-    "Lift drive maintenance zero accepted: retained position setpoints are "
-    "now stale (zero_generation=%llu).",
-    static_cast<unsigned long long>(zero_generation));
   // P00.15 is an absolute-encoder maintenance setting. The LD3M manual marks
   // it effective only after a power restart, so 6064h during this process is
   // not a valid completion signal. Keep the axis disabled and require a fresh

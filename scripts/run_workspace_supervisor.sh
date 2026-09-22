@@ -24,4 +24,5 @@ unset FASTDDS_BUILTIN_TRANSPORTS
 exec "${WORKSPACE_ROOT}/install/robot_control/lib/robot_control/workspace_supervisor_ubuntu" \
   --ros-args \
   -p allowed_source:="${WORKSPACE_CONTROL_ALLOWED_SOURCE:-jetson_192_168_2_10}" \
-  -p status_source:="${WORKSPACE_STATUS_SOURCE:-ubuntu_192_168_2_20}"
+  -p status_source:="${WORKSPACE_STATUS_SOURCE:-ubuntu_192_168_2_20}" \
+  -p real_hardware_readiness_timeout_ms:="${WORKSPACE_READINESS_TIMEOUT_MS:-60000}"

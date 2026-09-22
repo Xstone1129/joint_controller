@@ -104,6 +104,7 @@ private:
     const char * reason,
     SoftStopCompletion completion = SoftStopCompletion::disable,
     uint64_t hold_generation = 0);
+  void apply_zero_frame_resync();
   void enter_hold(double measured_position, const char * reason);
   void confirm_pending_hold();
   void fail_pending_hold(HoldFailureStage stage);
@@ -124,6 +125,11 @@ private:
   bool lift_fault_line_due(const char * code) const noexcept;
   void note_lift_fault_repeat(const char * code) noexcept;
   void write_lift_fault(const char * code, const std::string & detail);
+
+  // Newest latched fault as "code: detail", empty when nothing is latched.
+  // Published as the top-level fault_reason of the controller status so a
+  // controller-side fault is never reported to the host without a reason.
+  std::string last_fault_text() const;
   template<typename DetailBuilder>
   void record_lift_fault(const char * code, DetailBuilder && build_detail)
   {
@@ -228,6 +234,15 @@ private:
   std::atomic<uint16_t> driver_error_code_{0};
   std::atomic<int8_t> driver_mode_display_{0};
   std::atomic<int64_t> driver_status_ns_{0};
+  // Coordinate-frame generation reported by LiftHardware.  A change means a
+  // re-zero moved the drive origin, so every setpoint captured earlier is
+  // now expressed in the previous frame.
+  std::atomic<uint64_t> driver_zero_generation_{0};
+  std::atomic<bool> driver_zero_generation_valid_{false};
+  uint64_t applied_zero_generation_{0};
+  uint64_t zero_resync_total_{0};
+  double last_zero_resync_from_m_{0.0};
+  double last_zero_resync_to_m_{0.0};
   std::atomic<bool> power_enable_requested_{false};
   std::atomic<bool> power_enabled_state_{false};
 

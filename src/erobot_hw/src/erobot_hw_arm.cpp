@@ -87,7 +87,8 @@ hardware_interface::CallbackReturn Robot_arm_Ethercat_Hardware::on_init(
 {
   //检查初始化是否成功
   if (
-    hardware_interface::SystemInterface::on_init(info) != hardware_interface::CallbackReturn::SUCCESS)
+    hardware_interface::SystemInterface::on_init(info) !=
+    hardware_interface::CallbackReturn::SUCCESS)
   {
     return hardware_interface::CallbackReturn::ERROR;
   }
@@ -102,8 +103,8 @@ hardware_interface::CallbackReturn Robot_arm_Ethercat_Hardware::on_init(
   hw_slowdown_ = stod(info_.hardware_parameters["example_param_hw_slowdown"]);
   arm_class_ = stod(info_.hardware_parameters["arm_class"]);
   sim_ = stod(info_.hardware_parameters["sim"]);
-  
-  switch((int)arm_class_){
+
+  switch ((int)arm_class_) {
     case 1:
       bais_ = 0;
       break;
@@ -116,7 +117,7 @@ hardware_interface::CallbackReturn Robot_arm_Ethercat_Hardware::on_init(
     default:
       break;
   }
-  
+
   hw_states_.resize(info_.joints.size());
   hw_commands_.resize(info_.joints.size());
   joint_shared_slots_.resize(info_.joints.size());
@@ -158,38 +159,38 @@ hardware_interface::CallbackReturn Robot_arm_Ethercat_Hardware::on_init(
   hw_states_uint.resize(info_.joints.size(), std::numeric_limits<uint16_t>::quiet_NaN());
   hw_commands_uint.resize(info_.joints.size(), std::numeric_limits<uint16_t>::quiet_NaN());
 
-    // 定义预期的接口类型
+  // 定义预期的接口类型
   std::set<std::string> expected_command_interfaces = {
     "position", "velocity", "effort", "status", "mode", "power_enable"
   };
-  
+
   std::set<std::string> expected_state_interfaces = {
-    "position", "velocity", "effort", "motor_encoder_0", "motor_encoder_1", 
+    "position", "velocity", "effort", "motor_encoder_0", "motor_encoder_1",
     "status", "error_code", "mode", "power_enable"
   };
 
   // 检查每个关节的接口配置
   for (size_t i = 0; i < info_.joints.size(); ++i) {
-    const auto& joint = info_.joints[i];
+    const auto & joint = info_.joints[i];
 
     // === 命令接口检查 ===
     std::set<std::string> actual_command_interface_names;
-    for (const auto& interface : joint.command_interfaces) {
+    for (const auto & interface : joint.command_interfaces) {
       actual_command_interface_names.insert(interface.name);
     }
-    
+
     // 检查缺少的接口
-    for (const auto& expected : expected_command_interfaces) {
+    for (const auto & expected : expected_command_interfaces) {
       if (actual_command_interface_names.find(expected) == actual_command_interface_names.end()) {
         RCLCPP_FATAL(
           rclcpp::get_logger("Robot_arm_Ethercat_Hardware"),
-          "Joint '%s' is missing command interface: '%s'", 
+          "Joint '%s' is missing command interface: '%s'",
           joint.name.c_str(), expected.c_str());
         return hardware_interface::CallbackReturn::ERROR;
       }
     }
     // 初始化状态值
-    for (auto& state : hw_states_) {
+    for (auto & state : hw_states_) {
       state = {
         .position = 0,
         .velocity = 0,
@@ -206,30 +207,29 @@ hardware_interface::CallbackReturn Robot_arm_Ethercat_Hardware::on_init(
     }
     // === 状态接口检查 ===
     std::set<std::string> actual_state_interface_names;
-    for (const auto& interface : joint.state_interfaces) {
+    for (const auto & interface : joint.state_interfaces) {
       actual_state_interface_names.insert(interface.name);
-      
+
       // 处理初始值（仅position接口）
       if (interface.name == "position" && !interface.initial_value.empty()) {
         try {
-           hw_states_[i].position = std::stod(interface.initial_value);
-           
-        } 
-        catch (const std::exception& e) {
+          hw_states_[i].position = std::stod(interface.initial_value);
+
+        } catch (const std::exception & e) {
           RCLCPP_INFO(
             rclcpp::get_logger("Robot_arm_Ethercat_Hardware"),
-            "Failed to parse initial position for joint '%s': %s", 
+            "Failed to parse initial position for joint '%s': %s",
             joint.name.c_str(), e.what());
         }
       }
     }
-    
+
     // 检查缺少的接口
-    for (const auto& expected : expected_state_interfaces) {
+    for (const auto & expected : expected_state_interfaces) {
       if (actual_state_interface_names.find(expected) == actual_state_interface_names.end()) {
         RCLCPP_FATAL(
           rclcpp::get_logger("Robot_arm_Ethercat_Hardware"),
-          "Joint '%s' is missing state interface: '%s'", 
+          "Joint '%s' is missing state interface: '%s'",
           joint.name.c_str(), expected.c_str());
         return hardware_interface::CallbackReturn::ERROR;
       }
@@ -237,21 +237,20 @@ hardware_interface::CallbackReturn Robot_arm_Ethercat_Hardware::on_init(
 
     RCLCPP_DEBUG(
       rclcpp::get_logger("Robot5_arm_read_numbers"), "%f ..",
-      hw_states_[i].position );
+      hw_states_[i].position);
     // // 初始化命令值为当前状态
     // hw_commands_ = hw_states_;
-    if(sim_  > 0.0){
+    if (sim_ > 0.0) {
 
-      for (uint i = 0; i < hw_states_.size(); i++)
-      {
-         hw_commands_[i].position = hw_states_[i].position;
+      for (uint i = 0; i < hw_states_.size(); i++) {
+        hw_commands_[i].position = hw_states_[i].position;
       }
     }
     RCLCPP_DEBUG(
       rclcpp::get_logger("Robot_arm_Ethercat_Hardware"),
       "Joint '%s' initialized with %zu command and %zu state interfaces",
-      joint.name.c_str(), 
-      joint.command_interfaces.size(), 
+      joint.name.c_str(),
+      joint.command_interfaces.size(),
       joint.state_interfaces.size());
   }
   return hardware_interface::CallbackReturn::SUCCESS;
@@ -264,8 +263,7 @@ hardware_interface::CallbackReturn Robot_arm_Ethercat_Hardware::on_configure(
   RCLCPP_DEBUG(
     rclcpp::get_logger("Robot_arm_Ethercat_Hardware"), "Configuring ...please wait...");
 
-  for (int i = 0; i < hw_start_sec_; i++)
-  {
+  for (int i = 0; i < hw_start_sec_; i++) {
     rclcpp::sleep_for(std::chrono::seconds(1));
     RCLCPP_DEBUG(
       rclcpp::get_logger("Robot_arm_Ethercat_Hardware"), "%.1f seconds left.",
@@ -273,11 +271,10 @@ hardware_interface::CallbackReturn Robot_arm_Ethercat_Hardware::on_configure(
   }
 
   //reset values always when configuring hardware
-  for (uint i = 0; i < hw_states_.size(); i++)
-  {
+  for (uint i = 0; i < hw_states_.size(); i++) {
     //hw_states_[i] = 0;
     //hw_commands_[i] = 0;
-    
+
     hw_commands_[i].position = hw_states_[i].position;
   }
 
@@ -289,56 +286,62 @@ hardware_interface::CallbackReturn Robot_arm_Ethercat_Hardware::on_configure(
 std::vector<hardware_interface::StateInterface> Robot_arm_Ethercat_Hardware::export_state_interfaces()
 {
   std::vector<hardware_interface::StateInterface> interfaces;
-  
-  for (size_t i = 0; i < info_.joints.size(); ++i) 
-  {
-    const auto& joint = info_.joints[i];
-    
+
+  for (size_t i = 0; i < info_.joints.size(); ++i) {
+    const auto & joint = info_.joints[i];
+
     // 注册状态接口中的所有字段
     interfaces.emplace_back(joint.name, "position", &hw_states_[i].position);
     interfaces.emplace_back(joint.name, "velocity", &hw_states_[i].velocity);
     interfaces.emplace_back(joint.name, "effort", &hw_states_[i].effort);
-    
+
     // 双编码器接口
     interfaces.emplace_back(joint.name, "motor_encoder_0", &hw_states_[i].motor_encoder[0]);
     interfaces.emplace_back(joint.name, "motor_encoder_1", &hw_states_[i].motor_encoder[1]);
-    
+
     // 状态和控制接口 - 使用reinterpret_cast
-    interfaces.emplace_back(joint.name, "status", 
-                           (&hw_states_[i].status));
-    interfaces.emplace_back(joint.name, "error_code",
-                           (&hw_states_[i].error_code));
-    interfaces.emplace_back(joint.name, "mode", 
-                           (&hw_states_[i].mode));
-    interfaces.emplace_back(joint.name, "power_enable", 
-                           (&hw_states_[i].power_enable));
+    interfaces.emplace_back(
+      joint.name, "status",
+      (&hw_states_[i].status));
+    interfaces.emplace_back(
+      joint.name, "error_code",
+      (&hw_states_[i].error_code));
+    interfaces.emplace_back(
+      joint.name, "mode",
+      (&hw_states_[i].mode));
+    interfaces.emplace_back(
+      joint.name, "power_enable",
+      (&hw_states_[i].power_enable));
   }
-  
+
   return interfaces;
 }
 
-std::vector<hardware_interface::CommandInterface> Robot_arm_Ethercat_Hardware::export_command_interfaces()
+std::vector<hardware_interface::CommandInterface> Robot_arm_Ethercat_Hardware::
+export_command_interfaces()
 {
   std::vector<hardware_interface::CommandInterface> interfaces;
-  
-  for (size_t i = 0; i < info_.joints.size(); ++i) 
-  {
-    const auto& joint = info_.joints[i];
-    
+
+  for (size_t i = 0; i < info_.joints.size(); ++i) {
+    const auto & joint = info_.joints[i];
+
     // 注册命令接口中的所有字段
     interfaces.emplace_back(joint.name, "position", &hw_commands_[i].position);
     interfaces.emplace_back(joint.name, "velocity", &hw_commands_[i].velocity);
     interfaces.emplace_back(joint.name, "effort", &hw_commands_[i].effort);
-    
+
     // 启用状态接口
-    interfaces.emplace_back(joint.name, "power_enable", 
-                           (&hw_commands_[i].power_enable));
-    
-        // 状态和控制接口 - 使用reinterpret_cast
-    interfaces.emplace_back(joint.name, "status", 
-                           (&hw_commands_[i].status));
-    interfaces.emplace_back(joint.name, "mode", 
-                           (&hw_commands_[i].mode));
+    interfaces.emplace_back(
+      joint.name, "power_enable",
+      (&hw_commands_[i].power_enable));
+
+    // 状态和控制接口 - 使用reinterpret_cast
+    interfaces.emplace_back(
+      joint.name, "status",
+      (&hw_commands_[i].status));
+    interfaces.emplace_back(
+      joint.name, "mode",
+      (&hw_commands_[i].mode));
   }
   return interfaces;
 }
@@ -350,16 +353,14 @@ hardware_interface::CallbackReturn Robot_arm_Ethercat_Hardware::on_activate(
   RCLCPP_DEBUG(
     rclcpp::get_logger("Robot_arm_Ethercat_Hardware"), "Activating ...please wait...");
 
-  for (int i = 0; i < hw_start_sec_; i++)
-  {
+  for (int i = 0; i < hw_start_sec_; i++) {
     // rclcpp::sleep_for(std::chrono::seconds(1));
     RCLCPP_DEBUG(
       rclcpp::get_logger("Robot_arm_Ethercat_Hardware"), "%.1f seconds left..",
       hw_start_sec_ - i);
   }
   // command and state should be equal when starting
-  for (uint i = 0; i < hw_states_.size(); i++)
-  {
+  for (uint i = 0; i < hw_states_.size(); i++) {
     hw_commands_[i].position = hw_states_[i].position;
   }
 
@@ -374,8 +375,7 @@ hardware_interface::CallbackReturn Robot_arm_Ethercat_Hardware::on_deactivate(
 {
   RCLCPP_DEBUG(rclcpp::get_logger("Robot_arm_Ethercat_Hardware"), "Deactivating ...please wait...");
 
-  for (int i = 0; i < hw_stop_sec_; i++)
-  {
+  for (int i = 0; i < hw_stop_sec_; i++) {
     //rclcpp::sleep_for(std::chrono::seconds(1));
     RCLCPP_DEBUG(
       rclcpp::get_logger("Robot_arm_Ethercat_Hardware"), "%.1f seconds left...",
@@ -388,10 +388,11 @@ hardware_interface::CallbackReturn Robot_arm_Ethercat_Hardware::on_deactivate(
 }
 
 //从PLC的共享内存中获取关节的实际状态，并将这些状态转换为适合控制系统使用的格式
-hardware_interface::return_type Robot_arm_Ethercat_Hardware::read(const rclcpp::Time & time, const rclcpp::Duration & period)
+hardware_interface::return_type Robot_arm_Ethercat_Hardware::read(
+  const rclcpp::Time & time,
+  const rclcpp::Duration & period)
 {
-  if(sim_  < 1.0)
-  {
+  if (sim_ < 1.0) {
     const bool igh_driver_alive = is_igh_driver_alive();
     const bool ethercat_operational =
       igh_driver_alive && joint_shm_real_ptr != nullptr && joint_shm_real_ptr->ec_powerstate == 1;
@@ -399,7 +400,8 @@ hardware_interface::return_type Robot_arm_Ethercat_Hardware::read(const rclcpp::
       static auto last_warning = std::chrono::steady_clock::time_point{};
       const auto now = std::chrono::steady_clock::now();
       if (last_warning.time_since_epoch().count() == 0 ||
-          now - last_warning >= std::chrono::seconds(2)) {
+        now - last_warning >= std::chrono::seconds(2))
+      {
         RCLCPP_WARN(
           rclcpp::get_logger("Robot_arm_Ethercat_Hardware"),
           "EtherCAT feedback is unavailable (igh_driver_alive=%s, pid=%d, ec_powerstate=%u); "
@@ -410,31 +412,28 @@ hardware_interface::return_type Robot_arm_Ethercat_Hardware::read(const rclcpp::
         last_warning = now;
       }
     }
-    for (uint8_t i = 0; i < hw_states_.size(); i++)
-    {
-        if (!ethercat_operational) {
-          // A newly-created or stale shared-memory block contains zeroed/unknown
-          // drive data. Never expose that as a valid disabled drive state.
-          hw_states_[i].velocity = 0.0;
-          hw_states_[i].effort = 0.0;
-          hw_states_[i].status = 0.0;
-          hw_states_[i].error_code = 0.0;
-          hw_states_[i].power_enable = 0.0;
-          continue;
-        }
-        const std::size_t shared_slot = joint_shared_slots_[i];
-        get_joint_real(
-          joint_shm_real_ptr->axis_state[shared_slot], hw_states_[i], ZERO, 0);
-        hw_states_[i].status = double(joint_shm_real_ptr->axis_state[shared_slot].ec_ctrstate);
-    }
-  }
-  else{
-    for (uint8_t i = 0; i < hw_states_.size(); i++)
-    {
-        const bool enabled = hw_commands_[i].power_enable != 0.0;
-        hw_states_[i].status = enabled ? 39.0 : 64.0;
+    for (uint8_t i = 0; i < hw_states_.size(); i++) {
+      if (!ethercat_operational) {
+        // A newly-created or stale shared-memory block contains zeroed/unknown
+        // drive data. Never expose that as a valid disabled drive state.
+        hw_states_[i].velocity = 0.0;
+        hw_states_[i].effort = 0.0;
+        hw_states_[i].status = 0.0;
         hw_states_[i].error_code = 0.0;
-        hw_states_[i].power_enable = enabled ? 1.0 : 0.0;
+        hw_states_[i].power_enable = 0.0;
+        continue;
+      }
+      const std::size_t shared_slot = joint_shared_slots_[i];
+      get_joint_real(
+        joint_shm_real_ptr->axis_state[shared_slot], hw_states_[i], ZERO, 0);
+      hw_states_[i].status = double(joint_shm_real_ptr->axis_state[shared_slot].ec_ctrstate);
+    }
+  } else {
+    for (uint8_t i = 0; i < hw_states_.size(); i++) {
+      const bool enabled = hw_commands_[i].power_enable != 0.0;
+      hw_states_[i].status = enabled ? 39.0 : 64.0;
+      hw_states_[i].error_code = 0.0;
+      hw_states_[i].power_enable = enabled ? 1.0 : 0.0;
     }
   }
   return hardware_interface::return_type::OK;
@@ -445,7 +444,7 @@ hardware_interface::return_type Robot_arm_Ethercat_Hardware::write(
   const rclcpp::Time & time, const rclcpp::Duration & period)
 {
   bool power_enable_requested = false;
-  for (const auto& command : hw_commands_) {
+  for (const auto & command : hw_commands_) {
     if (command.power_enable != 0.0) {
       power_enable_requested = true;
       break;
@@ -455,18 +454,16 @@ hardware_interface::return_type Robot_arm_Ethercat_Hardware::write(
   joint_shm_desire_ptr->ec_poweron =
     power_enable_requested && power_request_allowed ? 1 : 0;
 
-  if(sim_  < 1.0)
-  {
-    for(uint8_t i=0;i<hw_states_.size();i++){
+  if (sim_ < 1.0) {
+    for (uint8_t i = 0; i < hw_states_.size(); i++) {
       const std::size_t shared_slot = joint_shared_slots_[i];
       set_joint_desire(
         joint_shm_desire_ptr->axis_ctr[shared_slot], hw_commands_[i], ZERO, 0,
         static_cast<uint8_t>(hw_commands_[i].mode));
       // RCLCPP_INFO(rclcpp::get_logger("erobot_hw_arm_real"), "HW !!!  %d: T write:%f,read: %f",i,hw_commands_[i].effort,hw_states_[i].effort);
     }
-  }
-  else{
-    for(uint8_t i=0;i<hw_states_.size();i++){
+  } else {
+    for (uint8_t i = 0; i < hw_states_.size(); i++) {
       hw_states_[i].position = hw_commands_[i].position;
       hw_states_[i].velocity = hw_commands_[i].velocity;
       // RCLCPP_INFO(rclcpp::get_logger("erobot_hw_arm_sim"), "HW !!! size %d: velocity %f",i,hw_commands_[i].velocity);
@@ -485,16 +482,21 @@ void Robot_arm_Ethercat_Hardware::init_shm_desire()
   // shared_memory_object::remove("Nxtos_amr_disire");
 
   // Create a shared memory object
-	shm_desire_ptr = std::make_shared<boost::interprocess::shared_memory_object>(boost::interprocess::open_or_create, "Ethercat_axis_desire", boost::interprocess::read_write,perm);
+  shm_desire_ptr = std::make_shared<boost::interprocess::shared_memory_object>(
+    boost::interprocess::open_or_create, "Ethercat_axis_desire", boost::interprocess::read_write,
+    perm);
 
   // Set the size of the shared memory object
-  shm_desire_ptr -> truncate(sizeof(ec_app_desire_reg_t));
+  shm_desire_ptr->truncate(sizeof(ec_app_desire_reg_t));
 
   // Map the shared memory object to a region of memory
-	mapped_region_desire_ptr = std::make_shared<boost::interprocess::mapped_region>(*shm_desire_ptr, boost::interprocess::read_write);
+  mapped_region_desire_ptr = std::make_shared<boost::interprocess::mapped_region>(
+    *shm_desire_ptr,
+    boost::interprocess::read_write);
 
   // Get a pointer to the mapped region of memory
-  joint_shm_desire_ptr = static_cast<ec_app_desire_reg_t*>(mapped_region_desire_ptr->get_address());
+  joint_shm_desire_ptr =
+    static_cast<ec_app_desire_reg_t *>(mapped_region_desire_ptr->get_address());
 }
 
 void Robot_arm_Ethercat_Hardware::init_shm_real()
@@ -505,18 +507,21 @@ void Robot_arm_Ethercat_Hardware::init_shm_real()
   // shared_memory_object::remove("Nxtos_amr_real");
 
   // Create a shared memory object
-	shm_real_ptr = std::make_shared<boost::interprocess::shared_memory_object>(boost::interprocess::open_or_create, "Ethercat_axis_real", boost::interprocess::read_write,perm);
+  shm_real_ptr = std::make_shared<boost::interprocess::shared_memory_object>(
+    boost::interprocess::open_or_create, "Ethercat_axis_real", boost::interprocess::read_write,
+    perm);
 
   // Set the size of the shared memory object
-  shm_real_ptr -> truncate(sizeof(ec_app_real_reg_t));
+  shm_real_ptr->truncate(sizeof(ec_app_real_reg_t));
 
   // Map the shared memory object to a region of memory
-	mapped_region_real_ptr = std::make_shared<boost::interprocess::mapped_region>(*shm_real_ptr, boost::interprocess::read_write);
+  mapped_region_real_ptr = std::make_shared<boost::interprocess::mapped_region>(
+    *shm_real_ptr,
+    boost::interprocess::read_write);
 
   // Get a pointer to the mapped region of memory
-  joint_shm_real_ptr = static_cast<ec_app_real_reg_t*>(mapped_region_real_ptr->get_address());
+  joint_shm_real_ptr = static_cast<ec_app_real_reg_t *>(mapped_region_real_ptr->get_address());
 }
-
 
 
 }  // namespace Robot_arm_hardware_interface

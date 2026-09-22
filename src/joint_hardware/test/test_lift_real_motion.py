@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Small real-lift smoke test using only the installed ros2 command line.
+"""
+Small real-lift smoke test using only the installed ros2 command line.
 
 The controller and hardware must already be running.  This intentionally does
 not import rclpy, so it can be copied to a test machine with just ROS 2 CLI.
@@ -30,15 +31,25 @@ def service_call(name, srv_type, value):
 def main():
     parser = argparse.ArgumentParser(description="bounded lift real-hardware motion smoke test")
     parser.add_argument("--direction", choices=("up", "down"), default="up")
-    parser.add_argument("--duration", type=float, default=1.0, help="motion duration in seconds (max 10)")
+    parser.add_argument(
+        "--duration", type=float, default=1.0,
+        help="motion duration in seconds (max 10)")
     parser.add_argument("--speed-rpm", type=float, default=10.0, help="jog speed (max 60 rpm)")
     parser.add_argument("--rate", type=float, default=50.0)
-    parser.add_argument("--yes", action="store_true", help="skip the interactive safety confirmation")
-    parser.add_argument("--no-enable", action="store_true", help="do not call /lift_brake_command before motion")
+    parser.add_argument(
+        "--yes", action="store_true",
+        help="skip the interactive safety confirmation")
+    parser.add_argument(
+        "--no-enable", action="store_true",
+        help="do not call /lift_brake_command before motion")
     args = parser.parse_args()
     if shutil.which("ros2") is None:
         parser.error("ros2 command not found; source the ROS 2 environment first")
-    if not (0.05 <= args.duration <= 10.0 and 0.1 <= args.speed_rpm <= 60.0 and 10 <= args.rate <= 100):
+    if not (
+        0.05 <= args.duration <= 10.0
+        and 0.1 <= args.speed_rpm <= 60.0
+        and 10 <= args.rate <= 100
+    ):
         parser.error("duration must be 0.05..10 s, speed 0.1..60 rpm, rate 10..100 Hz")
     if not args.yes:
         answer = input("REAL LIFT WILL MOVE {} at {:.1f} rpm for {:.2f}s. Type MOVE: ".format(
